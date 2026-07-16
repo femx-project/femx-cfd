@@ -1,7 +1,8 @@
 # femx-cfd
 
 Python applications for computational fluid dynamics (CFD) forward simulation,
-data assimilation, and inverse analysis, built on [femx](third-party/femx).
+data assimilation, and inverse analysis, built on
+[femx](https://github.com/femx-project/femx).
 
 ## Setup
 
