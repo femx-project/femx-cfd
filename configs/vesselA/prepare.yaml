@@ -1,0 +1,12 @@
+# @package case
+
+defaults:
+  - /runtime@_global_
+  - _self_
+
+id: vesselA
+job: prepare
+prepared: ${hydra:runtime.cwd}/run/${case.id}/prepared
+velocity: ${case.prepared}/velocity.h5
+source: mri
+input: ${hydra:runtime.cwd}/data/vessel/vesselA/mri/velocity.h5

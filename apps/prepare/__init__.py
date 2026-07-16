@@ -1,0 +1,1 @@
+"""Synthetic observation preparation application."""

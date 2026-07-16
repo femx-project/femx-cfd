@@ -1,0 +1,57 @@
+# @package case
+
+defaults:
+  - /runtime@_global_
+  - /vesselA/common@_here_
+  - _self_
+
+job: var
+velocity: ${case.prepared}/velocity.h5
+inlet_file: ${case.prepared}/inlet.h5
+
+control:
+  boundary: inlet
+  kind: normal
+
+bc:
+  - boundary: wall
+    field: velocity
+    components: all
+    space:
+      kind: uniform
+      value: [0.0, 0.0, 0.0]
+    time:
+      kind: uniform
+  - boundary: outlet
+    field: pressure
+    space:
+      kind: uniform
+      value: 0.0
+    time:
+      kind: uniform
+
+fluid:
+  rho: 1050.0
+  mu: 0.0035
+
+time:
+  T: 0.48
+  dt: 0.0025
+
+simulation:
+  end_time: ${case.time.T}
+
+solver:
+  backend: resolve-cuda
+  petsc_options: -ksp_type fgmres -pc_type ilu -ksp_rtol 1e-10
+
+var:
+  optimizer: tao
+  max_iterations: 40
+  gradient_tolerance: 0.001
+  function_tolerance: 1e-12
+  control_bounds: [0.0, 1.5]
+  regularization:
+    background: 0.05
+    space: 0.002
+    time: 0.02

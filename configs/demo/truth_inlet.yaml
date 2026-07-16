@@ -1,0 +1,35 @@
+# @package case
+
+defaults:
+  - /runtime@_global_
+  - /demo/common@_here_
+  - _self_
+
+job: truth-inlet
+
+control:
+  boundary: inlet
+  kind: normal
+  normal: auto
+
+bc:
+  - boundary: inlet
+    field: velocity
+    components: all
+    direction: normal
+    space:
+      kind: poisson
+      peak: 1.0
+    time:
+      kind: harmonics
+      mean: 1.0
+      terms:
+        - kind: sin
+          order: 1
+          amplitude: 0.5
+
+inlet:
+  source: analytic
+  output: ${case.prepared}/truth_inlet.h5
+  T: 1.0
+  dt: 0.05

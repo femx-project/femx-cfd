@@ -1,0 +1,5 @@
+id: vesselA
+
+mesh: ${hydra:runtime.cwd}/data/vessel/vesselA/mesh/vessel.msh
+
+prepared: ${hydra:runtime.cwd}/run/${case.id}/prepared

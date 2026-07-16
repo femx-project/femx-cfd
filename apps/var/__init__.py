@@ -1,0 +1,1 @@
+"""Var command-line application."""

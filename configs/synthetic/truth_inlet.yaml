@@ -1,0 +1,49 @@
+# @package case
+
+defaults:
+  - /runtime@_global_
+  - /synthetic/common@_here_
+  - _self_
+
+job: truth-inlet
+
+control:
+  boundary: inlet
+  kind: normal
+  normal: auto
+
+bc:
+  - boundary: inlet
+    field: velocity
+    components: all
+    direction: normal
+    space:
+      kind: poisson
+      # For the 2D channel, peak 0.3 m/s gives U_ave = 0.2 m/s.
+      peak: 0.3
+    time:
+      kind: harmonics
+      mean: 1.0
+      terms:
+        - kind: sin
+          order: 1
+          amplitude: 0.50
+          phase: -0.30
+        - kind: sin
+          order: 2
+          amplitude: 0.22
+          phase: -1.00
+        - kind: sin
+          order: 3
+          amplitude: 0.12
+          phase: -1.40
+        - kind: cos
+          order: 4
+          amplitude: 0.06
+          phase: 0.20
+
+inlet:
+  source: analytic
+  output: ${case.prepared}/truth_inlet.h5
+  T: 0.48
+  dt: 0.0002

@@ -1,0 +1,60 @@
+# @package case
+
+defaults:
+  - /runtime@_global_
+  - /demo/common@_here_
+  - _self_
+
+job: envar
+velocity: ${case.prepared}/velocity.h5
+inlet_file: ${case.prepared}/inlet.h5
+
+control:
+  boundary: inlet
+  kind: normal
+
+bc:
+  - boundary: wall
+    field: velocity
+    components: all
+    space:
+      kind: uniform
+      value: [0.0, 0.0]
+    time:
+      kind: uniform
+  - boundary: outlet
+    field: pressure
+    space:
+      kind: uniform
+      value: 0.0
+    time:
+      kind: uniform
+
+fluid:
+  rho: 1.0
+  mu: 0.01
+
+time:
+  T: 1.0
+  dt: 0.05
+
+simulation:
+  end_time: ${case.time.T}
+
+solver:
+  backend: petsc
+  petsc_options: -ksp_type fgmres -pc_type bjacobi -sub_pc_type ilu -ksp_rtol 1e-8
+
+ensemble:
+  workers: 1
+  mode_scales:
+    flow_mean: 0.25
+    flow_sin1: 0.35
+    flow_cos1: 0.25
+    skew_mean: 0.25
+    skew_sin1: 0.2
+    shape_mean: 0.18
+
+envar:
+  overwrite: true
+  prior_weight: 0.25

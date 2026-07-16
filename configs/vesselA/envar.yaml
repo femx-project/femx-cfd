@@ -1,0 +1,62 @@
+# @package case
+
+defaults:
+  - /runtime@_global_
+  - /vesselA/common@_here_
+  - _self_
+
+job: envar
+velocity: ${case.prepared}/velocity.h5
+inlet_file: ${case.prepared}/inlet.h5
+
+control:
+  boundary: inlet
+  kind: normal
+
+bc:
+  - boundary: wall
+    field: velocity
+    components: all
+    space:
+      kind: uniform
+      value: [0.0, 0.0, 0.0]
+    time:
+      kind: uniform
+  - boundary: outlet
+    field: pressure
+    space:
+      kind: uniform
+      value: 0.0
+    time:
+      kind: uniform
+
+fluid:
+  rho: 1050.0
+  mu: 0.0035
+
+time:
+  T: 0.48
+  dt: 0.0025
+
+simulation:
+  end_time: ${case.time.T}
+
+solver:
+  backend: resolve-cuda
+  petsc_options: -ksp_type fgmres -pc_type ilu -ksp_rtol 1e-10
+
+ensemble:
+  mode_scales:
+    flow_mean: 0.15
+    flow_sin1: 0.15
+    flow_cos1: 0.15
+    flow_sin2: 0.1
+    flow_cos2: 0.1
+    skew_mean: 0.1
+    skew_sin1: 0.1
+    skew_cos1: 0.1
+    shape_mean: 0.1
+    shape_cos2: 0.1
+
+envar:
+  prior_weight: 1.0

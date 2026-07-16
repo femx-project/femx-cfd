@@ -1,0 +1,148 @@
+"""MRI loading and discrete-velocity projection onto an inlet."""
+
+import h5py
+import numpy as np
+
+
+def load_mri(path):
+    with h5py.File(path, "r") as h5:
+        if "x" not in h5 or "u" not in h5 or "t" not in h5:
+            raise ValueError("MRI HDF5 must contain x, u, and t")
+        pts = np.asarray(h5["x"][...], dtype=float)
+        vel_keys = sorted(h5["u"])
+        time_keys = sorted(h5["t"])
+        if vel_keys != time_keys or not vel_keys:
+            raise ValueError("MRI velocity and time keys must match")
+        times = np.asarray([h5["t"][key][()] for key in time_keys], dtype=float)
+        vel = np.stack([h5["u"][key][...] for key in vel_keys])
+
+    if pts.ndim != 2 or pts.shape[1] != 3 or pts.shape[0] == 0:
+        raise ValueError("MRI points must have shape (num_points, 3)")
+    if vel.shape != (times.size, pts.shape[0], 3):
+        raise ValueError("MRI velocity must have shape (num_times, num_points, 3)")
+    if (
+        not np.all(np.isfinite(pts))
+        or not np.all(np.isfinite(times))
+        or not np.all(np.isfinite(vel))
+        or np.any(np.diff(times) <= 0.0)
+    ):
+        raise ValueError("MRI data must be finite with increasing times")
+    return pts, times, np.asarray(vel, dtype=float)
+
+
+def inlet_frame(surface, dim, normal):
+    coords = np.asarray(surface.coordinates)[:, :dim]
+    center = coords.mean(axis=0)
+    centered = coords - center
+
+    _, _, axes = np.linalg.svd(np.asarray(normal).reshape(1, dim))
+    tangents = axes[1:].T
+    local = centered @ tangents
+
+    return center, tangents, local
+
+
+def _line_stencils(local_nodes, elements, pts):
+    nodes = np.asarray(local_nodes, dtype=float).reshape(-1)
+    pts = np.asarray(pts, dtype=float).reshape(-1)
+    stencils = np.zeros((pts.size, nodes.size))
+    keep = np.ones(pts.size, dtype=bool)
+    for row, pt in enumerate(pts):
+        found = False
+        for edge in np.asarray(elements, dtype=int):
+            left, right = nodes[edge]
+            length = right - left
+            if abs(length) <= np.finfo(float).eps:
+                continue
+            weight = (pt - left) / length
+            if -1.0e-8 <= weight <= 1.0 + 1.0e-8:
+                stencils[row, edge] = (1.0 - weight, weight)
+                found = True
+                break
+        keep[row] = found
+    return stencils[keep], keep
+
+
+def _triangle_stencils(local_nodes, elements, pts):
+    local_nodes = np.asarray(local_nodes, dtype=float)
+    elements = np.asarray(elements, dtype=int)
+    pts = np.asarray(pts, dtype=float)
+    stencils = np.zeros((pts.shape[0], local_nodes.shape[0]))
+    keep = np.ones(pts.shape[0], dtype=bool)
+    for row, pt in enumerate(pts):
+        best = None
+        best_margin = -np.inf
+        for triangle in elements:
+            a, b, c = local_nodes[triangle]
+            e0 = b - a
+            e1 = c - a
+            rhs = pt - a
+            det = e0[0] * e1[1] - e0[1] * e1[0]
+            if abs(det) <= np.finfo(float).eps:
+                continue
+            r = (rhs[0] * e1[1] - rhs[1] * e1[0]) / det
+            s = (e0[0] * rhs[1] - e0[1] * rhs[0]) / det
+            wts = np.asarray((1.0 - r - s, r, s))
+            margin = float(wts.min())
+            if margin >= -1.0e-8 and margin > best_margin:
+                best = (triangle, wts)
+                best_margin = margin
+        if best is None:
+            keep[row] = False
+            continue
+        triangle, wts = best
+        stencils[row, triangle] = wts
+    return stencils[keep], keep
+
+
+def _surface_stencils(local_nodes, elements, pts):
+    if np.asarray(elements).shape[1] == 2:
+        return _line_stencils(local_nodes, elements, pts)
+    return _triangle_stencils(local_nodes, elements, pts)
+
+
+def project_to_inlet(surface, pts, vel, normal, opts):
+    """Fit MRI velocities to smooth inlet-normal profiles."""
+
+    dim = pts.shape[1]
+    center, tangents, local = inlet_frame(surface, dim, normal)
+    rel = pts - center
+    dist = rel @ normal
+    proj = pts - dist[:, None] * normal
+    proj_local = (proj - center) @ tangents
+    selected = np.flatnonzero(
+        (dist >= -1.0e-8) & (dist <= opts["depth"])
+    )
+    stencils, keep = _surface_stencils(
+        local,
+        surface.elements,
+        proj_local[selected],
+    )
+    selected = selected[keep]
+    selected_dist = dist[selected]
+    if selected.size < opts["laplacian_modes"] + 2:
+        raise ValueError("too few inlet-near MRI points for the projection basis")
+
+    eigvals, eigmodes = surface.laplacian_modes(opts["laplacian_modes"])
+    poisson = surface.poisson_profile(normalize=False)
+    basis = np.column_stack((poisson, eigmodes))
+    scales = np.max(np.abs(basis), axis=0)
+    scaled_basis = basis / scales
+    sample_basis = stencils @ scaled_basis
+    axial = vel[:, selected] @ normal
+    decay = opts["axial_decay"]
+    wts = np.exp(-0.5 * np.square(selected_dist / decay))
+    weighted_basis = np.sqrt(wts)[:, None] * sample_basis
+    ridge = float(opts["ridge"])
+    penalties = np.concatenate(
+        ([0.0], np.sqrt(ridge) * eigvals / eigvals[0])
+    )
+    lhs = np.vstack((weighted_basis, np.diag(penalties)))
+
+    profs = []
+    for target in axial:
+        rhs = np.concatenate((np.sqrt(wts) * target, np.zeros(basis.shape[1])))
+        coeff = np.linalg.lstsq(lhs, rhs, rcond=None)[0]
+        profs.append(scaled_basis @ coeff)
+
+    return normal, np.asarray(profs)

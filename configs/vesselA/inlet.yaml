@@ -1,0 +1,27 @@
+# @package case
+
+defaults:
+  - /runtime@_global_
+  - /vesselA/common@_here_
+  - _self_
+
+job: inlet
+
+time:
+  T: 0.48
+
+control:
+  boundary: inlet
+  kind: normal
+  normal: auto
+
+inlet:
+  source: velocity
+  output: ${case.prepared}/inlet.h5
+  file: ${case.prepared}/velocity.h5
+  T: ${case.time.T}
+  projection:
+    depth: 0.001
+    axial_decay: 0.0005
+    laplacian_modes: 6
+    ridge: 0.001

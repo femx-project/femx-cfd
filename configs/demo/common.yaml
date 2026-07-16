@@ -1,0 +1,5 @@
+id: demo
+
+mesh: ${hydra:runtime.cwd}/data/meshes/demo/2d_rectangle_4x1.msh
+
+prepared: ${hydra:runtime.cwd}/run/${case.id}/prepared
