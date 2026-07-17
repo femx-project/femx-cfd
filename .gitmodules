@@ -1,4 +1,0 @@
-[submodule "third-party/femx"]
-	path = third-party/femx
-	url = https://github.com/femx-project/femx.git
-	branch = main

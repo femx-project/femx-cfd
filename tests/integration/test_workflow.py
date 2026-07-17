@@ -18,13 +18,7 @@ class EnVarWorkflowTest(unittest.TestCase):
     @staticmethod
     def make_prob():
         mesh_file = (
-            Path(__file__).resolve().parents[2]
-            / "third-party"
-            / "femx"
-            / "python"
-            / "tests"
-            / "data"
-            / "2d_tiny_tube.msh"
+            Path(__file__).resolve().parents[1] / "data" / "2d_tiny_tube.msh"
         )
         model = femx.NavierStokesModel(
             mesh_file,

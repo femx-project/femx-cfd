@@ -17,15 +17,7 @@ from femx_cfd import (
 )
 
 
-MESH_FILE = (
-    Path(__file__).resolve().parents[2]
-    / "third-party"
-    / "femx"
-    / "python"
-    / "tests"
-    / "data"
-    / "2d_tiny_tube.msh"
-)
+MESH_FILE = Path(__file__).resolve().parents[1] / "data" / "2d_tiny_tube.msh"
 
 
 class InletDataTest(unittest.TestCase):

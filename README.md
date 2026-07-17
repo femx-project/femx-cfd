@@ -6,10 +6,10 @@ data assimilation, and inverse analysis, built on
 
 ## Setup
 
-Clone the repository with its `femx` submodule:
+Clone the repository:
 
 ```shell
-git clone --recurse-submodules <repository-url>
+git clone <repository-url>
 cd femx-cfd
 ```
 
@@ -32,7 +32,16 @@ export HDF5_ROOT=/path/to/hdf5
 Once either setup is complete, install the packages:
 
 ```shell
-python -m pip install -e ./third-party/femx
+python -m pip install \
+  "femx @ git+https://github.com/femx-project/femx.git@v0.2.0"
+python -m pip install -e .
+```
+
+For development with a local `femx` checkout, install that checkout instead of
+the tagged GitHub release:
+
+```shell
+python -m pip install -e /path/to/femx
 python -m pip install -e .
 ```
 
@@ -41,7 +50,8 @@ needed:
 
 ```shell
 CMAKE_PREFIX_PATH=/path/to/resolve \
-  python -m pip install -e ./third-party/femx \
+  python -m pip install \
+  "femx @ git+https://github.com/femx-project/femx.git@v0.2.0" \
   -Ccmake.define.FEMX_ENABLE_RESOLVE=ON
 ```
 

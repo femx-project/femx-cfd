@@ -8,15 +8,7 @@ from femx_cfd import InletData, VelocityData
 from femx_cfd.models import navier_stokes as ns
 
 
-MESH_FILE = (
-    Path(__file__).resolve().parents[2]
-    / "third-party"
-    / "femx"
-    / "python"
-    / "tests"
-    / "data"
-    / "2d_tiny_tube.msh"
-)
+MESH_FILE = Path(__file__).resolve().parents[1] / "data" / "2d_tiny_tube.msh"
 
 
 class ParallelEnsembleIntegrationTest(unittest.TestCase):
