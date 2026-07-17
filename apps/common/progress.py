@@ -1,5 +1,6 @@
-"""Compact terminal progress for inverse applications."""
+"""Terminal and machine-readable progress for CFD applications."""
 
+import json
 import sys
 
 
@@ -87,6 +88,39 @@ class NullProgress:
 
     def __call__(self, _event):
         return None
+
+    def close(self):
+        return None
+
+
+class JsonProgress:
+    """Write one JSON object per line for GUI and job-runner consumers."""
+
+    def __init__(self, stream=None):
+        self.stream = stream or sys.stdout
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+    @staticmethod
+    def _default(value):
+        item = getattr(value, "item", None)
+        if item is None:
+            raise TypeError(f"{type(value).__name__} is not JSON serializable")
+        return item()
+
+    def _write(self, event):
+        self.stream.write(json.dumps(event, default=self._default) + "\n")
+        self.stream.flush()
+
+    def stage(self, message):
+        self._write({"type": "stage", "message": message})
+
+    def __call__(self, event):
+        self._write(dict(event))
 
     def close(self):
         return None

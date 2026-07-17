@@ -19,11 +19,17 @@ dependencies = [
 [project.scripts]
 femx-var-demo = "apps.demo.main:var_main"
 femx-envar-demo = "apps.demo.main:envar_main"
+femx-forward = "apps.forward.main:main"
 femx-mesh = "apps.mesh.main:main"
 femx-prepare = "apps.prepare.main:main"
 femx-inlet = "apps.inlet.main:main"
 femx-envar = "apps.envar.main:main"
 femx-var = "apps.var.main:main"
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8",
+]
 
 [tool.setuptools]
 packages = [
@@ -36,6 +42,7 @@ packages = [
     "apps.common",
     "apps.demo",
     "apps.envar",
+    "apps.forward",
     "apps.inlet",
     "apps.mesh",
     "apps.prepare",
@@ -45,3 +52,7 @@ packages = [
 
 [tool.setuptools.package-data]
 configs = ["*.yaml", "demo/*.yaml", "synthetic/*.yaml", "vesselA/*.yaml"]
+
+[tool.pytest.ini_options]
+addopts = "--import-mode=importlib"
+testpaths = ["tests"]

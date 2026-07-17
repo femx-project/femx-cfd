@@ -1,7 +1,15 @@
 import io
+import json
 import unittest
 
-from apps.common.progress import ConsoleProgress, NullProgress, console
+import numpy as np
+
+from apps.common.progress import (
+    ConsoleProgress,
+    JsonProgress,
+    NullProgress,
+    console,
+)
 
 
 class Terminal(io.StringIO):
@@ -63,6 +71,30 @@ class ConsoleProgressTest(unittest.TestCase):
 
         self.assertIn("\r\033[Kadjoint", stream.getvalue())
         self.assertIn("2/4", stream.getvalue())
+
+
+class JsonProgressTest(unittest.TestCase):
+    def test_writes_stage_and_solver_events_as_json_lines(self):
+        stream = io.StringIO()
+        prog = JsonProgress(stream)
+
+        prog.stage("forward: solving")
+        prog(
+            {
+                "type": "solve",
+                "step": np.int64(1),
+                "total": np.int64(2),
+            }
+        )
+
+        events = [json.loads(line) for line in stream.getvalue().splitlines()]
+        self.assertEqual(
+            events,
+            [
+                {"type": "stage", "message": "forward: solving"},
+                {"type": "solve", "step": 1, "total": 2},
+            ],
+        )
 
 
 if __name__ == "__main__":

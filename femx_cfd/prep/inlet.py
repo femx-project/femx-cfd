@@ -152,6 +152,7 @@ def repeat_inlet(inlet, cycles, end_time=None):
         vals=np.vstack(vals),
         periodic=False,
         source=inlet.source,
+        kind=inlet.kind,
     )
 
 
