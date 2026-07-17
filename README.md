@@ -67,7 +67,9 @@ CMAKE_PREFIX_PATH=/path/to/resolve \
 
 `femx-forward` runs one portable YAML case. Mesh paths are resolved relative to
 the case file, so Studio can place `case.yaml` and `mesh.msh` in the same job
-directory:
+directory. `mesh.length_unit` declares how the stored coordinates are
+interpreted; the solver converts `mm` and `cm` meshes to SI meters before
+assembly:
 
 ```yaml
 format: femx-cfd-forward
@@ -119,6 +121,10 @@ clients can request newline-delimited JSON progress on standard output:
 ```shell
 femx-forward case.yaml --progress json
 ```
+
+The case format and result manifest are the runtime interface used by
+femx-studio. Studio launches this command in a separate Conda environment; it
+does not import PETSc or femx-cfd into the Qt process.
 
 ## Pulsatile-flow demo
 
