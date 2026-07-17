@@ -24,7 +24,7 @@ class ForwardApplicationTest(unittest.TestCase):
             case = {
                 "format": CASE_FORMAT,
                 "version": CASE_VERSION,
-                "mesh": "mesh.msh",
+                "mesh": {"path": "mesh.msh", "length_unit": "mm"},
                 "fluid": {"rho": 1.0, "mu": 0.01},
                 "time": {"dt": 0.25, "end_time": 0.25},
                 "inlet": {
@@ -55,6 +55,10 @@ class ForwardApplicationTest(unittest.TestCase):
             self.assertTrue((output / "flow.xdmf").is_file())
             with h5py.File(output / "flow.h5", "r") as h5:
                 self.assertEqual(len(h5["Data"]), 2)
+                self.assertAlmostEqual(
+                    float(abs(h5["Mesh/Geometry"][...]).max()),
+                    1.0e-3,
+                )
 
             status = json.loads((output / "status.json").read_text())
             result = json.loads((output / "result.json").read_text())
@@ -78,7 +82,7 @@ class ForwardApplicationTest(unittest.TestCase):
                     {
                         "format": CASE_FORMAT,
                         "version": CASE_VERSION,
-                        "mesh": "mesh.msh",
+                        "mesh": {"path": "mesh.msh", "length_unit": "m"},
                         "fluid": {"rho": 1.0, "mu": 0.01},
                         "time": {"dt": 0.25, "end_time": 0.25},
                         "inlet": {

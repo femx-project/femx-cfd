@@ -72,7 +72,9 @@ directory:
 ```yaml
 format: femx-cfd-forward
 version: 1
-mesh: mesh.msh
+mesh:
+  path: mesh.msh
+  length_unit: mm
 
 fluid:
   rho: 1050.0

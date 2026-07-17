@@ -1,10 +1,13 @@
 """Stable forward-simulation case loading and execution."""
 
 from copy import deepcopy
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
+import tempfile
 
 import femx
+import gmsh
 import numpy as np
 from omegaconf import OmegaConf
 
@@ -14,6 +17,11 @@ from femx_cfd.prep.inlet import analytic_inlet, inlet_normal, repeat_inlet
 
 CASE_FORMAT = "femx-cfd-forward"
 CASE_VERSION = 1
+LENGTH_SCALES = {
+    "mm": 1.0e-3,
+    "cm": 1.0e-2,
+    "m": 1.0,
+}
 
 
 @dataclass(frozen=True)
@@ -144,16 +152,27 @@ def validate_forward_case(case, base_dir=None):
     if case.get("version") != CASE_VERSION:
         raise ValueError(f"case.version must be {CASE_VERSION}")
 
-    mesh_value = case.get("mesh")
+    mesh_options = case.get("mesh")
+    if isinstance(mesh_options, str):
+        mesh_options = {"path": mesh_options, "length_unit": "m"}
+    mesh_options = _mapping(mesh_options, "mesh")
+    mesh_value = mesh_options.get("path")
     if not isinstance(mesh_value, str) or not mesh_value:
-        raise ValueError("mesh must be a nonempty path")
+        raise ValueError("mesh.path must be a nonempty path")
     mesh = Path(mesh_value).expanduser()
     if not mesh.is_absolute() and base_dir is not None:
         mesh = Path(base_dir) / mesh
     mesh = mesh.resolve()
     if not mesh.is_file():
         raise ValueError(f"mesh does not exist: {mesh}")
-    case["mesh"] = str(mesh)
+    length_unit = mesh_options.get("length_unit", "m")
+    if length_unit not in LENGTH_SCALES:
+        choices = ", ".join(LENGTH_SCALES)
+        raise ValueError(f"mesh.length_unit must be one of: {choices}")
+    case["mesh"] = {
+        "path": str(mesh),
+        "length_unit": length_unit,
+    }
 
     fluid = _mapping(case.get("fluid"), "fluid")
     fluid["rho"] = _positive(fluid.get("rho"), "fluid.rho")
@@ -213,55 +232,86 @@ def _fixed_conditions(case, dimension):
     return conditions
 
 
+@contextmanager
+def _mesh_in_meters(mesh_options):
+    path = Path(mesh_options["path"])
+    scale = LENGTH_SCALES[mesh_options["length_unit"]]
+    if scale == 1.0:
+        yield path
+        return
+    if gmsh.isInitialized():
+        raise RuntimeError("mesh scaling requires ownership of the Gmsh runtime")
+
+    with tempfile.TemporaryDirectory(prefix="femx-cfd-mesh-") as directory:
+        scaled = Path(directory) / "mesh.msh"
+        gmsh.initialize()
+        try:
+            gmsh.option.setNumber("General.Terminal", 0)
+            gmsh.open(str(path))
+            gmsh.model.mesh.affineTransform(
+                [
+                    scale, 0.0, 0.0, 0.0,
+                    0.0, scale, 0.0, 0.0,
+                    0.0, 0.0, scale, 0.0,
+                    0.0, 0.0, 0.0, 1.0,
+                ]
+            )
+            gmsh.write(str(scaled))
+        finally:
+            gmsh.finalize()
+        yield scaled
+
+
 def _make_forward_problem(case):
-    mesh = femx.Mesh.read(case["mesh"])
-    inlet_options = case["inlet"]
-    boundary = inlet_options["boundary"]
-    surface = mesh.boundary(boundary)
-    normal = inlet_normal(
-        mesh,
-        surface,
-        inlet_options["normal"],
-    )
-    inlet = analytic_inlet(
-        surface,
-        {
-            "T": inlet_options["period"],
-            "dt": case["time"]["dt"],
-        },
-        normal,
-        boundary,
-        space=inlet_options["profile"],
-        time=inlet_options["waveform"],
-    )
+    with _mesh_in_meters(case["mesh"]) as mesh_path:
+        mesh = femx.Mesh.read(mesh_path)
+        inlet_options = case["inlet"]
+        boundary = inlet_options["boundary"]
+        surface = mesh.boundary(boundary)
+        normal = inlet_normal(
+            mesh,
+            surface,
+            inlet_options["normal"],
+        )
+        inlet = analytic_inlet(
+            surface,
+            {
+                "T": inlet_options["period"],
+                "dt": case["time"]["dt"],
+            },
+            normal,
+            boundary,
+            space=inlet_options["profile"],
+            time=inlet_options["waveform"],
+        )
 
-    cycles = int(round(case["time"]["end_time"] / inlet_options["period"]))
-    inlet = repeat_inlet(
-        inlet,
-        cycles,
-        end_time=case["time"]["end_time"],
-    )
-    inlet = replace(
-        inlet,
-        times=inlet.times[1:],
-        vals=inlet.vals[1:],
-        periodic=False,
-    )
+        cycles = int(round(case["time"]["end_time"] / inlet_options["period"]))
+        inlet = repeat_inlet(
+            inlet,
+            cycles,
+            end_time=case["time"]["end_time"],
+        )
+        inlet = replace(
+            inlet,
+            times=inlet.times[1:],
+            vals=inlet.vals[1:],
+            periodic=False,
+        )
 
-    problem_case = {
-        "mesh": case["mesh"],
-        "fluid": case["fluid"],
-        "time": {"dt": case["time"]["dt"]},
-        "simulation": {"end_time": case["time"]["end_time"]},
-        "control": {"boundary": boundary, "kind": "normal"},
-        "bc": _fixed_conditions(case, mesh.dimension),
-    }
-    problem = make_problem(
-        problem_case,
-        times=inlet.times,
-        periodic=False,
-        normal=inlet.normal,
-    )
+        problem_case = {
+            "mesh": str(mesh_path),
+            "fluid": case["fluid"],
+            "time": {"dt": case["time"]["dt"]},
+            "simulation": {"end_time": case["time"]["end_time"]},
+            "control": {"boundary": boundary, "kind": "normal"},
+            "bc": _fixed_conditions(case, mesh.dimension),
+        }
+        problem = make_problem(
+            problem_case,
+            times=inlet.times,
+            periodic=False,
+            normal=inlet.normal,
+        )
     return problem, inlet.params_for(problem)
 
 

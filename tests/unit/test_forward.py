@@ -46,7 +46,13 @@ class ForwardCaseTest(unittest.TestCase):
 
             case = load_forward_case(case_path)
 
-        self.assertEqual(case["mesh"], str((directory / "mesh.msh").resolve()))
+        self.assertEqual(
+            case["mesh"],
+            {
+                "path": str((directory / "mesh.msh").resolve()),
+                "length_unit": "m",
+            },
+        )
         self.assertEqual(case["inlet"]["period"], 0.25)
         self.assertEqual(
             case["inlet"]["waveform"],
@@ -66,6 +72,14 @@ class ForwardCaseTest(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "inlet"):
             validate_forward_case(case)
+
+    def test_accepts_explicit_mesh_length_unit(self):
+        case = make_case(MESH)
+        case["mesh"] = {"path": str(MESH), "length_unit": "mm"}
+
+        validated = validate_forward_case(case)
+
+        self.assertEqual(validated["mesh"]["length_unit"], "mm")
 
 
 if __name__ == "__main__":
