@@ -9,8 +9,15 @@ data assimilation, and inverse analysis, built on
 Clone the repository:
 
 ```shell
-git clone <repository-url>
+git clone https://github.com/femx-project/femx-cfd.git
 cd femx-cfd
+```
+
+Create and activate an isolated Conda environment:
+
+```shell
+conda create -n femx-cfd python=3.12 pip
+conda activate femx-cfd
 ```
 
 `femx` is a native extension. Its default Python build requires PETSc (with
@@ -29,6 +36,7 @@ conda install -c conda-forge cmake ninja pkg-config
 export PETSC_DIR=/path/to/petsc
 export HDF5_ROOT=/path/to/hdf5
 ```
+
 Once either setup is complete, install the packages:
 
 ```shell
