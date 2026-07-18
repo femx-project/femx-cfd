@@ -64,10 +64,7 @@ class ConsoleProgress:
     def _clear(self) -> None:
         if not self.active:
             return
-        if self.tty:
-            self.stream.write("\r\033[K")
-        else:
-            self.stream.write("\n")
+        self.stream.write("\r\033[K")
         self.stream.flush()
         self.active = False
 

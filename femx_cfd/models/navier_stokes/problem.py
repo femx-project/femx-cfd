@@ -65,21 +65,14 @@ def make_problem(
     control = cfg["control"]
     add_bc(prob, cfg)
 
-    if control["kind"] == "normal":
-        ctr = femx.NormalVelocityControl(
-            control["boundary"],
-            normal=normal,
-            times=times,
-            periodic=periodic,
-        )
-    elif control["kind"] == "vector":
-        ctr = femx.VelocityControl(
-            control["boundary"],
-            times=times,
-            periodic=periodic,
-        )
-    else:
-        raise ValueError("control.kind must be 'normal' or 'vector'")
+    if control["kind"] != "normal":
+        raise ValueError("control.kind must be 'normal'")
+    ctr = femx.NormalVelocityControl(
+        control["boundary"],
+        normal=normal,
+        times=times,
+        periodic=periodic,
+    )
     prob.add_ctr(ctr)
     if init_state is not None:
         prob.set_initial_state(init_state)

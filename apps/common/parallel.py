@@ -21,10 +21,6 @@ class Runtime:
     def is_root(self) -> bool:
         return self.rank == 0
 
-    @property
-    def distributed(self) -> bool:
-        return self.size > 1
-
     def barrier(self) -> None:
         if self.backend == "petsc":
             femx.petsc_barrier()

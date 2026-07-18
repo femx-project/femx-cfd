@@ -43,7 +43,6 @@ class ParallelEnsembleTest(unittest.TestCase):
 
         self.assertEqual(runtime, Runtime("petsc", rank=1, size=3))
         self.assertFalse(runtime.is_root)
-        self.assertTrue(runtime.distributed)
         barrier.assert_called_once_with()
         finalize.assert_called_once_with()
 
