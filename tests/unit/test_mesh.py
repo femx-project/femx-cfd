@@ -1,4 +1,4 @@
-"""Tests for synthetic mesh generation without requiring Gmsh."""
+"""Tests for synthetic example mesh generation without requiring Gmsh."""
 
 import importlib.util
 import sys
@@ -8,12 +8,12 @@ import unittest
 from pathlib import Path
 
 
-_MODULE_PATH = Path(__file__).parents[2] / "femx_cfd" / "mesh" / "straight.py"
-_SPEC = importlib.util.spec_from_file_location("straight_mesh", _MODULE_PATH)
-straight_mesh = importlib.util.module_from_spec(_SPEC)
+_MODULE_PATH = Path(__file__).parents[2] / "tools" / "synthetic" / "mesh.py"
+_SPEC = importlib.util.spec_from_file_location("synthetic_mesh", _MODULE_PATH)
+synthetic_mesh = importlib.util.module_from_spec(_SPEC)
 assert _SPEC.loader is not None
-_SPEC.loader.exec_module(straight_mesh)
-write_straight_tube = straight_mesh.write_straight_tube
+_SPEC.loader.exec_module(synthetic_mesh)
+write_straight_tube = synthetic_mesh.write_straight_tube
 
 
 class _FakeMesh:

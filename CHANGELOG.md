@@ -22,6 +22,8 @@
 - Preserved `femx-forward` as a compatibility alias for forward case version 1.
 - Replaced Hydra/OmegaConf case loading with plain versioned YAML documents.
 - Forwarded named backend options from portable forward cases to femx solvers.
+- Moved synthetic mesh and observation generation helpers from the installed
+  package to `tools/synthetic`.
 
 ### Removed
 

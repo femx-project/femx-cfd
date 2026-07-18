@@ -1,1 +1,1 @@
-"""Synthetic and MRI data preparation."""
+"""Inlet and MRI data preparation."""
