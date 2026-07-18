@@ -7,9 +7,9 @@ import unittest
 from pathlib import Path
 
 import h5py
-from omegaconf import OmegaConf
+import yaml
 
-from apps.forward.main import run_cli
+from femx_cfd.cli import run_forward_cli as run_cli
 from femx_cfd.forward import CASE_FORMAT, CASE_VERSION
 
 
@@ -43,7 +43,7 @@ class ForwardApplicationTest(unittest.TestCase):
                 "solver": {"backend": "dense"},
             }
             case_path = directory / "case.yaml"
-            OmegaConf.save(OmegaConf.create(case), case_path)
+            case_path.write_text(yaml.safe_dump(case), encoding="utf-8")
             stdout = io.StringIO()
 
             with contextlib.redirect_stdout(stdout):
@@ -75,8 +75,8 @@ class ForwardApplicationTest(unittest.TestCase):
             directory = Path(directory)
             shutil.copyfile(MESH, directory / "mesh.msh")
             case_path = directory / "case.yaml"
-            OmegaConf.save(
-                OmegaConf.create(
+            case_path.write_text(
+                yaml.safe_dump(
                     {
                         "format": CASE_FORMAT,
                         "version": CASE_VERSION,
@@ -92,9 +92,9 @@ class ForwardApplicationTest(unittest.TestCase):
                             {"boundary": "outlet", "kind": "pressure"},
                         ],
                         "solver": {"backend": "dense"},
-                    }
+                    },
                 ),
-                case_path,
+                encoding="utf-8",
             )
             output = directory / "result"
             output.mkdir()

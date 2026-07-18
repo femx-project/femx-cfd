@@ -5,8 +5,8 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from apps.common.artifacts import bundle_result, write_observations
 from femx_cfd import VelocityData, save_velocity
+from femx_cfd.runtime.output import bundle_result, write_observations
 
 
 class ResultBundleTest(unittest.TestCase):

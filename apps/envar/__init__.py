@@ -1,1 +1,0 @@
-"""EnVar command-line application."""
