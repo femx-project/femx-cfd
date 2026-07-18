@@ -25,12 +25,18 @@ class Runtime:
         if self.backend == "petsc":
             femx.petsc_barrier()
 
-    def finalize(self) -> None:
+    def collect(self) -> None:
+        """Release deferred solver objects without finalizing PETSc."""
+
         if self.backend == "petsc":
             # pybind keep-alive relationships can defer PETSc object cleanup
             # until cyclic garbage collection even after an application run
             # has returned.
             gc.collect()
+
+    def finalize(self) -> None:
+        if self.backend == "petsc":
+            self.collect()
             femx.petsc_finalize()
 
 

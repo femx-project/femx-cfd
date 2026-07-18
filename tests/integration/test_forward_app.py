@@ -10,7 +10,7 @@ import h5py
 import yaml
 
 from femx_cfd.cli import run_forward_cli as run_cli
-from femx_cfd.forward import CASE_FORMAT, CASE_VERSION
+from femx_cfd import CASE_FORMAT, CASE_VERSION
 
 
 MESH = Path(__file__).resolve().parents[1] / "data" / "2d_tiny_tube.msh"

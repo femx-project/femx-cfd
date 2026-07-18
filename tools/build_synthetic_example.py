@@ -5,13 +5,12 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import femx
 import yaml
 
-from femx_cfd.data import VelocityData, save_inlet, save_velocity
-from femx_cfd.mesh import write_straight_tube
-from femx_cfd.prep import synthetic
+from femx_cfd.data import save_inlet, save_velocity
 from femx_cfd.prep.inlet import make_inlet
+from synthetic.mesh import write_straight_tube
+from synthetic.observation import make_velocity_observations
 
 
 def _fixed_conditions() -> list[dict[str, object]]:
@@ -47,11 +46,11 @@ def _base_case(method: str) -> dict[str, object]:
         "mesh": {"path": "mesh.msh", "length_unit": "m"},
         "fluid": {"rho": 1.0, "mu": 0.01},
         "time": {"period": 1.0, "dt": 0.25, "end_time": 1.0},
+        "solver": {"backend": "petsc"},
         "control": {"boundary": "inlet", "kind": "normal"},
         "boundary_conditions": _portable_boundaries(),
         "observations": {"kind": "velocity", "path": "observations.h5"},
         "initialization": {"inlet": {"source": "file", "path": "initial_inlet.h5"}},
-        "solver": {"backend": "dense"},
     }
     if method == "var":
         case["algorithm"] = {
@@ -76,16 +75,6 @@ def _base_case(method: str) -> dict[str, object]:
             },
         }
     return case
-
-
-def _normalize_mesh(path: Path) -> None:
-    """Remove generator whitespace so the packaged text mesh stays clean."""
-
-    lines = path.read_text(encoding="utf-8").splitlines()
-    path.write_text(
-        "\n".join(line.rstrip() for line in lines) + "\n",
-        encoding="utf-8",
-    )
 
 
 def build(output: Path, force: bool = False) -> None:
@@ -113,7 +102,6 @@ def build(output: Path, force: bool = False) -> None:
         diameter=1.0,
         cell_size=0.25,
     )
-    _normalize_mesh(mesh_path)
 
     truth_case = {
         "mesh": str(mesh_path),
@@ -146,25 +134,10 @@ def build(output: Path, force: bool = False) -> None:
         },
     }
     truth_inlet = make_inlet(truth_case)
-    truth_problem, truth_parameters, cycles = synthetic.make_truth_problem(
-        truth_case,
-        truth_inlet,
+    save_velocity(
+        velocity_path,
+        make_velocity_observations(truth_case, truth_inlet),
     )
-    truth = truth_problem.solve(truth_parameters, backend="dense")
-    points = synthetic.obs_points(truth_case)
-    times = synthetic.obs_times(truth_case)
-    observation = femx.VelocityObservationOperator(
-        truth_problem.model,
-        points,
-        synthetic.obs_times(truth_case, cycle=cycles),
-        components=range(truth_problem.model.mesh.dimension),
-    )
-    velocity = VelocityData(
-        points=points,
-        times=times,
-        vals=observation.reshape(observation.predict(truth)),
-    )
-    save_velocity(velocity_path, velocity)
 
     inlet_case = {
         "mesh": str(mesh_path),
@@ -199,7 +172,6 @@ def main() -> None:
         type=Path,
         default=(
             Path(__file__).resolve().parents[1]
-            / "femx_cfd"
             / "examples"
             / "inverse"
             / "straight_tube"

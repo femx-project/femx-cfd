@@ -17,15 +17,26 @@
 - Changed the development version to `0.3.0.dev0`.
 - Moved application logic into `femx_cfd.cases`, `femx_cfd.workflows`, and
   `femx_cfd.runtime`.
+- Moved the Var and EnVar implementations into `femx_cfd.da` while preserving
+  their top-level `femx_cfd` imports.
 - Changed `femx-var` and `femx-envar` to use portable inverse cases through the
   common runner.
 - Preserved `femx-forward` as a compatibility alias for forward case version 1.
 - Replaced Hydra/OmegaConf case loading with plain versioned YAML documents.
 - Forwarded named backend options from portable forward cases to femx solvers.
+- Moved synthetic mesh and observation generation helpers from the installed
+  package to `tools/synthetic`.
+- Moved canonical example sources to the repository-level `examples` directory
+  and made CLI discovery manifest-driven.
+- Changed bundled examples to exercise the default PETSc solver backend.
+- Kept PETSc reusable after Python API case runs while retaining process-owned
+  finalization in CLI execution.
 
 ### Removed
 
 - Removed the installed top-level `apps` and `configs` packages.
+- Removed the redundant `femx_cfd.forward` compatibility module while
+  preserving the forward API through top-level `femx_cfd` imports.
 - Removed the public `femx-mesh`, `femx-prepare`, and `femx-inlet` pipeline
   commands; synthetic example construction now lives under `tools`.
 - Removed the method-specific `femx-var-demo` and `femx-envar-demo` commands;

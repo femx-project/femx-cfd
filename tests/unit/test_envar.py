@@ -4,7 +4,7 @@ from unittest.mock import patch
 import femx
 import numpy as np
 
-from femx_cfd.envar import _LinearProblem, _build_obs_basis
+from femx_cfd.da.envar import _LinearProblem, _build_obs_basis
 
 
 class LinearEnVarTest(unittest.TestCase):
@@ -160,7 +160,7 @@ class LinearEnVarTest(unittest.TestCase):
         basis = femx.EnsembleBasis(np.zeros(2), np.eye(2))
 
         with patch(
-            "femx_cfd.envar.lsq_linear",
+            "femx_cfd.da.envar.lsq_linear",
             side_effect=AssertionError("bounded solver must not be called"),
         ):
             res = _LinearProblem(

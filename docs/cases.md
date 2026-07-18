@@ -9,6 +9,7 @@ femx-cfd run case.yaml --output result
 
 The `format` field selects the workflow family. The `version` field versions
 that family's configuration schema independently from the Python package.
+The solver backend defaults to `petsc` when `solver.backend` is omitted.
 
 ## Forward cases
 
@@ -60,10 +61,11 @@ initialization:
 ```
 
 The `femx-cfd example` subcommand selects one of the canonical complete cases
-packaged under `femx_cfd/examples`:
+under the source repository's `examples` directory. These files are also
+bundled with installed distributions:
 
 ```text
-femx_cfd/examples/
+examples/
 ├── forward/straight_tube/case.yaml
 └── inverse/straight_tube/
     ├── var.yaml

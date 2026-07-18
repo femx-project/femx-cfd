@@ -8,7 +8,7 @@ import numpy as np
 
 import yaml
 
-from femx_cfd.forward import (
+from femx_cfd import (
     CASE_FORMAT,
     CASE_VERSION,
     load_forward_case,

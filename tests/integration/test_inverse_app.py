@@ -11,13 +11,7 @@ from femx_cfd.data import load_inlet
 from femx_cfd.runtime.runner import run_case
 
 
-EXAMPLE = (
-    Path(__file__).resolve().parents[2]
-    / "femx_cfd"
-    / "examples"
-    / "inverse"
-    / "straight_tube"
-)
+EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "inverse" / "straight_tube"
 
 
 @pytest.mark.parametrize("method", ("var", "envar"))

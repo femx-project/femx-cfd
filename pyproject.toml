@@ -34,6 +34,7 @@ test = [
 packages = [
     "femx_cfd",
     "femx_cfd.cases",
+    "femx_cfd.da",
     "femx_cfd.examples",
     "femx_cfd.models",
     "femx_cfd.models.navier_stokes",
@@ -43,13 +44,17 @@ packages = [
     "femx_cfd.workflows",
 ]
 
+[tool.setuptools.package-dir]
+# Keep user-facing sources at the repository root while installing them as
+# package resources for the public example command.
+"femx_cfd.examples" = "examples"
+
 [tool.setuptools.package-data]
-femx_cfd = [
-    "examples/forward/straight_tube/*.yaml",
-    "examples/forward/straight_tube/*.msh",
-    "examples/inverse/straight_tube/*.yaml",
-    "examples/inverse/straight_tube/*.msh",
-    "examples/inverse/straight_tube/*.h5",
+"femx_cfd.examples" = [
+    "index.yaml",
+    "*/*/*.yaml",
+    "*/*/*.msh",
+    "*/*/*.h5",
 ]
 
 [tool.pytest.ini_options]

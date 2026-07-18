@@ -74,8 +74,13 @@ def run_loaded_case(
     destination: PathLike,
     *,
     progress_kind: str = "console",
+    finalize_runtime: bool = False,
 ) -> Path:
-    """Execute one validated case and return its result directory."""
+    """Execute one validated case and return its result directory.
+
+    PETSc remains available for subsequent library calls unless
+    ``finalize_runtime`` is enabled by a process-owning caller such as the CLI.
+    """
 
     destination = Path(destination).expanduser().resolve()
     solver = case.resolved.get("solver", {})
@@ -131,7 +136,10 @@ def run_loaded_case(
         raise
     finally:
         if runtime is not None:
-            runtime.finalize()
+            if finalize_runtime:
+                runtime.finalize()
+            else:
+                runtime.collect()
 
 
 def run_case(
@@ -139,12 +147,18 @@ def run_case(
     destination: Optional[PathLike] = None,
     *,
     progress_kind: str = "console",
+    finalize_runtime: bool = False,
 ) -> Path:
-    """Load and run one portable CFD case."""
+    """Load and run one portable CFD case without finalizing PETSc by default."""
 
     case = load_case(case_path)
     output_path = result_path(case.path, destination)
-    return run_loaded_case(case, output_path, progress_kind=progress_kind)
+    return run_loaded_case(
+        case,
+        output_path,
+        progress_kind=progress_kind,
+        finalize_runtime=finalize_runtime,
+    )
 
 
 __all__ = ["result_path", "run_case", "run_loaded_case"]

@@ -1,4 +1,4 @@
-"""Gmsh generation for the synthetic straight-tube geometry."""
+"""Mesh generation for the synthetic inverse example."""
 
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ from femx_cfd._typing import PathLike
 def _require_gmsh() -> ModuleType:
     try:
         import gmsh
-    except ModuleNotFoundError as exc:
+    except ModuleNotFoundError as error:
         raise RuntimeError(
             "mesh generation requires Gmsh; install it with `pip install gmsh`"
-        ) from exc
+        ) from error
     return gmsh
 
 
@@ -25,6 +25,7 @@ def _boundary_curves(
     surface: int,
 ) -> tuple[list[int], list[int], list[int]]:
     """Return the rectangle's inlet, outlet, and wall curve tags."""
+
     half_length = length / 2
     tolerance = max(length, 1.0) * 1e-10
     inlet, outlet, wall = [], [], []
@@ -44,6 +45,14 @@ def _boundary_curves(
     return inlet, outlet, wall
 
 
+def _normalize(path: Path) -> None:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    path.write_text(
+        "\n".join(line.rstrip() for line in lines) + "\n",
+        encoding="utf-8",
+    )
+
+
 def write_straight_tube(
     path: PathLike,
     *,
@@ -51,12 +60,8 @@ def write_straight_tube(
     diameter: float,
     cell_size: float,
 ) -> None:
-    """Write a 2D rectangular flow mesh with named physical groups.
+    """Write a 2D rectangular flow mesh with named physical groups."""
 
-    The mesh spans ``[-length/2, length/2]`` by
-    ``[-diameter/2, diameter/2]`` and contains the ``fluid``, ``inlet``,
-    ``outlet``, and ``wall`` groups required by the Navier--Stokes workflow.
-    """
     if length <= 0 or diameter <= 0 or cell_size <= 0:
         raise ValueError("length, diameter, and cell_size must all be positive")
 
@@ -97,6 +102,7 @@ def write_straight_tube(
         gmsh.model.mesh.setSize(gmsh.model.getEntities(0), cell_size)
         gmsh.model.mesh.generate(2)
         gmsh.write(str(path))
+        _normalize(path)
     finally:
         if created_model:
             gmsh.model.remove()

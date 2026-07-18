@@ -10,17 +10,15 @@ from .data import (
     save_inlet,
     save_velocity,
 )
-from .envar import EnVar, EnVarResult
 from .cases import LoadedCase, load_case, validate_case
-from .forward import (
+from .cases.forward import (
     CASE_FORMAT,
     CASE_VERSION,
-    ForwardSolution,
     load_forward_case,
-    solve_forward,
     validate_forward_case,
 )
-from .var import Var, VarResult
+from .da import EnVar, EnVarResult, Var, VarResult
+from .workflows.forward import ForwardSolution, solve_forward
 from .workflows.inverse import InverseSolution, solve_inverse
 
 __all__ = [

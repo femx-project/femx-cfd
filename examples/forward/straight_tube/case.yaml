@@ -13,6 +13,9 @@ time:
   dt: 0.25
   end_time: 0.5
 
+solver:
+  backend: petsc
+
 inlet:
   boundary: inlet
   normal: auto
@@ -29,6 +32,3 @@ boundary_conditions:
   - boundary: outlet
     kind: pressure
     value: 0.0
-
-solver:
-  backend: dense

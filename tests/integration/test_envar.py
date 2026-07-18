@@ -4,7 +4,7 @@ from pathlib import Path
 import femx
 import numpy as np
 
-from femx_cfd.envar import _LinearProblem, _build_obs_basis
+from femx_cfd.da.envar import _LinearProblem, _build_obs_basis
 
 
 class FemxControlledEnVarIntegrationTest(unittest.TestCase):
