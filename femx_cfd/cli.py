@@ -145,7 +145,10 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> int:
         except Exception as error:
             print(f"error: {error}", file=sys.stderr)
             return 1
-        print(f"valid: {case.format} version {case.version}")
+        message = f"valid: {case.format} version {case.source_version}"
+        if case.source_version != case.version:
+            message += f" (migrates to version {case.version})"
+        print(message)
         return 0
     if args.command == "example":
         args.case = str(_example_cases()[args.kind])

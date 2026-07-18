@@ -24,7 +24,8 @@ control:
 
 boundary_conditions:
 - boundary: wall
-  kind: no_slip
+  kind: velocity
+  value: [0.0, 0.0]
 - boundary: outlet
   kind: pressure
   value: 0.0

@@ -118,11 +118,28 @@ def validate_fixed_boundaries(
         names.add(boundary)
 
         kind = condition.get("kind")
-        if kind == "no_slip":
+        if kind == "velocity":
+            try:
+                vector = np.asarray(condition.get("value"), dtype=float)
+            except (TypeError, ValueError) as error:
+                raise ValueError(
+                    f"boundary_conditions[{index}].value must contain "
+                    "2 or 3 finite values"
+                ) from error
+            if (
+                vector.ndim != 1
+                or vector.size not in (2, 3)
+                or not np.all(np.isfinite(vector))
+            ):
+                raise ValueError(
+                    f"boundary_conditions[{index}].value must contain "
+                    "2 or 3 finite values"
+                )
+            condition["value"] = vector.tolist()
             continue
         if kind == "pressure":
             try:
-                number = float(condition.get("value", 0.0))
+                number = float(condition.get("value"))
             except (TypeError, ValueError) as error:
                 raise ValueError(
                     f"boundary_conditions[{index}].value must be finite"
@@ -132,7 +149,7 @@ def validate_fixed_boundaries(
             condition["value"] = number
             continue
         raise ValueError(
-            f"boundary_conditions[{index}].kind must be 'no_slip' or 'pressure'"
+            f"boundary_conditions[{index}].kind must be 'velocity' or 'pressure'"
         )
     return conditions
 

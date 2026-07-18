@@ -1,75 +1,55 @@
-# Portable cases
+# Case files
 
-`femx-cfd` executes one versioned YAML case at a time:
+`femx-cfd` validates or runs one YAML case at a time. The file name is
+arbitrary; `format`, `version`, and `method` select the workflow.
 
 ```shell
 femx-cfd validate case.yaml
 femx-cfd run case.yaml --output result
 ```
 
-The `format` field selects the workflow family. The `version` field versions
-that family's configuration schema independently from the Python package.
-The solver backend defaults to `petsc` when `solver.backend` is omitted.
+Paths are relative to the case file.
 
-## Forward cases
+## Formats
 
-Forward case version 1 uses this identity:
+| Workflow | `format` | `version` | `method` |
+| --- | --- | ---: | --- |
+| Forward | `femx-cfd-forward` | 2 | — |
+| Var | `femx-cfd-inverse` | 1 | `var` |
+| EnVar | `femx-cfd-inverse` | 1 | `envar` |
 
-```yaml
-format: femx-cfd-forward
-version: 1
-```
+Format versions are independent from the femx-cfd package version. Forward
+version 1 remains loadable and is migrated to version 2 automatically.
 
-It declares a mesh and its length unit, fluid properties, time integration,
-one analytic inlet, fixed boundary conditions, and solver options. Paths are
-resolved relative to the case file.
+## Fixed boundaries
 
-## Inverse cases
-
-Inverse case version 1 uses this identity:
+Forward and inverse cases use explicit velocity vectors and pressure values:
 
 ```yaml
-format: femx-cfd-inverse
-version: 1
-method: var
+boundary_conditions:
+  - boundary: wall
+    kind: velocity
+    value: [0.0, 0.0, 0.0]
+  - boundary: outlet
+    kind: pressure
+    value: 0.0
 ```
 
-Supported methods are `var` and `envar`. An inverse case declares the shared
-mesh, fluid, time, control boundary, fixed boundary conditions, prepared
-velocity observations, inlet initialization, solver, and method options.
+Velocity vectors must match the mesh dimension. During forward version 1
+migration, `no_slip` becomes a zero velocity vector.
 
-Prepared inlet initialization references an HDF5 file:
+## Inverse inputs
 
-```yaml
-initialization:
-  inlet:
-    source: file
-    path: initial_inlet.h5
-```
+Inverse cases reference prepared velocity observations and initialize their
+inlet from an HDF5 file or from those observations. Complete Var and EnVar cases
+are available under `examples/inverse/`.
 
-The runner can instead derive it from the declared observations:
+## Examples
 
-```yaml
-initialization:
-  inlet:
-    source: observations
-    projection:
-      depth: 0.001
-      axial_decay: 0.0005
-      laplacian_modes: 6
-      ridge: 0.001
-```
-
-The `femx-cfd example` subcommand selects one of the canonical complete cases
-under the source repository's `examples` directory. These files are also
-bundled with installed distributions:
-
-```text
-examples/
-├── forward/straight_tube/case.yaml
-└── inverse/straight_tube/
-    ├── var.yaml
-    └── envar.yaml
+```shell
+femx-cfd example forward
+femx-cfd example var
+femx-cfd example envar
 ```
 
 Regenerate the synthetic inverse inputs with:
@@ -78,22 +58,7 @@ Regenerate the synthetic inverse inputs with:
 python tools/build_synthetic_example.py --force
 ```
 
-## Run output
+## Results
 
-Every run owns an initially empty result directory containing:
-
-```text
-result/
-├── case.yaml
-├── status.json
-├── result.json
-└── flow.xdmf
-```
-
-Forward results store their trajectory in `flow.h5`. Inverse results store
-their trajectory, parameters, and metrics in `result.h5` and also snapshot the
-prepared inlet as `initial_inlet.h5`.
-
-`status.json` records `running`, `complete`, or `failed`. `result.json`
-identifies the case family, method when applicable, and relative artifact
-paths. Existing nonempty result directories are never overwritten.
+Each run writes its case snapshot, status, result manifest, and flow artifacts
+to a new result directory. A nonempty result directory is never overwritten.

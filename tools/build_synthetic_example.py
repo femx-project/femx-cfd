@@ -33,7 +33,7 @@ def _fixed_conditions() -> list[dict[str, object]]:
 
 def _portable_boundaries() -> list[dict[str, object]]:
     return [
-        {"boundary": "wall", "kind": "no_slip"},
+        {"boundary": "wall", "kind": "velocity", "value": [0.0, 0.0]},
         {"boundary": "outlet", "kind": "pressure", "value": 0.0},
     ]
 

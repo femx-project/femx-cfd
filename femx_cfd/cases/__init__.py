@@ -33,6 +33,12 @@ class LoadedCase:
     def version(self) -> int:
         return self.resolved["version"]
 
+    @property
+    def source_version(self) -> int:
+        """Schema version declared by the source document."""
+
+        return self.document["version"]
+
 
 def load_case(path: PathLike) -> LoadedCase:
     """Load a supported case and dispatch validation by its format."""

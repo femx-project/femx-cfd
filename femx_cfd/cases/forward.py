@@ -1,4 +1,4 @@
-"""Forward case format version 1 validation and path resolution."""
+"""Forward case format version 2 migration, validation, and path resolution."""
 
 from copy import deepcopy
 from pathlib import Path
@@ -8,11 +8,16 @@ import numpy as np
 import yaml
 
 from femx_cfd._typing import Config, Dynamic, PathLike
-from femx_cfd.cases.validation import LENGTH_SCALES, validate_solver
+from femx_cfd.cases.migrations import migrate_forward_case
+from femx_cfd.cases.validation import (
+    LENGTH_SCALES,
+    validate_fixed_boundaries,
+    validate_solver,
+)
 
 
 CASE_FORMAT = "femx-cfd-forward"
-CASE_VERSION = 1
+CASE_VERSION = 2
 
 
 def _mapping(value: Dynamic, name: str) -> Config:
@@ -82,46 +87,6 @@ def _validate_inlet(inlet: Config, dt: float, end_time: float) -> None:
     inlet["waveform"] = waveform
 
 
-def _validate_boundary_conditions(
-    conditions: Dynamic,
-    inlet_boundary: str,
-) -> None:
-    if not isinstance(conditions, list) or not conditions:
-        raise ValueError("boundary_conditions must be a nonempty list")
-
-    names = set()
-    for index, condition in enumerate(conditions):
-        condition = _mapping(condition, f"boundary_conditions[{index}]")
-        boundary = condition.get("boundary")
-        if not isinstance(boundary, str) or not boundary:
-            raise ValueError(
-                f"boundary_conditions[{index}].boundary must be a nonempty string"
-            )
-        if boundary == inlet_boundary:
-            raise ValueError("the inlet must not also be a fixed boundary condition")
-        if boundary in names:
-            raise ValueError(f"duplicate boundary condition: {boundary}")
-        names.add(boundary)
-
-        kind = condition.get("kind")
-        if kind == "no_slip":
-            continue
-        if kind == "pressure":
-            try:
-                value = float(condition.get("value", 0.0))
-            except (TypeError, ValueError) as error:
-                raise ValueError(
-                    f"boundary_conditions[{index}].value must be finite"
-                ) from error
-            if not np.isfinite(value):
-                raise ValueError(f"boundary_conditions[{index}].value must be finite")
-            condition["value"] = value
-            continue
-        raise ValueError(
-            f"boundary_conditions[{index}].kind must be 'no_slip' or 'pressure'"
-        )
-
-
 def validate_forward_case(
     case: Dynamic,
     base_dir: Optional[PathLike] = None,
@@ -131,6 +96,7 @@ def validate_forward_case(
     case = deepcopy(_mapping(case, "case"))
     if case.get("format") != CASE_FORMAT:
         raise ValueError(f"case.format must be '{CASE_FORMAT}'")
+    case = migrate_forward_case(case, base_dir)
     if case.get("version") != CASE_VERSION:
         raise ValueError(f"case.version must be {CASE_VERSION}")
 
@@ -164,7 +130,10 @@ def validate_forward_case(
 
     inlet = _mapping(case.get("inlet"), "inlet")
     _validate_inlet(inlet, time["dt"], time["end_time"])
-    _validate_boundary_conditions(case.get("boundary_conditions"), inlet["boundary"])
+    case["boundary_conditions"] = validate_fixed_boundaries(
+        case.get("boundary_conditions"),
+        excluded={inlet["boundary"]},
+    )
 
     case["solver"] = validate_solver(case.get("solver"))
     return case
