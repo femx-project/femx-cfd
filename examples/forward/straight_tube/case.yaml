@@ -13,6 +13,9 @@ time:
   dt: 0.25
   end_time: 0.5
 
+solver:
+  backend: petsc
+
 inlet:
   boundary: inlet
   normal: auto

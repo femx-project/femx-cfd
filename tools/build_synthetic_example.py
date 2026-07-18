@@ -46,6 +46,7 @@ def _base_case(method: str) -> dict[str, object]:
         "mesh": {"path": "mesh.msh", "length_unit": "m"},
         "fluid": {"rho": 1.0, "mu": 0.01},
         "time": {"period": 1.0, "dt": 0.25, "end_time": 1.0},
+        "solver": {"backend": "petsc"},
         "control": {"boundary": "inlet", "kind": "normal"},
         "boundary_conditions": _portable_boundaries(),
         "observations": {"kind": "velocity", "path": "observations.h5"},

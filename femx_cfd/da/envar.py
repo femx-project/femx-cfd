@@ -7,7 +7,7 @@ import femx
 import numpy as np
 from scipy.optimize import lsq_linear
 
-from femx_cfd._typing import Dynamic, OptionalProgress
+from .._typing import Dynamic, OptionalProgress
 
 
 def _bound_val(val: Dynamic, default: float) -> float:

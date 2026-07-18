@@ -6,7 +6,7 @@ import femx
 import numpy as np
 from scipy.optimize import minimize
 
-from femx_cfd._typing import Dynamic, OptionalProgress
+from .._typing import Dynamic, OptionalProgress
 
 
 def _weight(val: float, name: str) -> float:

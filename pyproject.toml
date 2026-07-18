@@ -34,6 +34,7 @@ test = [
 packages = [
     "femx_cfd",
     "femx_cfd.cases",
+    "femx_cfd.da",
     "femx_cfd.examples",
     "femx_cfd.models",
     "femx_cfd.models.navier_stokes",

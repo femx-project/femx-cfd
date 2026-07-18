@@ -7,12 +7,11 @@ import femx
 
 from femx_cfd._typing import Config, Dynamic, Progress
 from femx_cfd.cases.inverse import validate_inverse_case
+from femx_cfd.da import EnVar, Var
 from femx_cfd.data import InletData, load_inlet, load_velocity, make_velocity_obs
-from femx_cfd.envar import EnVar
 from femx_cfd.mesh import mesh_in_meters
 from femx_cfd.models import navier_stokes as ns
 from femx_cfd.prep.inlet import inlet_normal, velocity_inlet
-from femx_cfd.var import Var
 
 
 @dataclass(frozen=True)

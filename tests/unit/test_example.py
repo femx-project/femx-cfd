@@ -5,6 +5,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import yaml
+
 from femx_cfd.cases import load_case
 from femx_cfd.cli import _example_cases, run_cli
 
@@ -16,6 +18,10 @@ class ExampleRunnerTest(unittest.TestCase):
         forward = load_case(cases["forward"])
         var = load_case(cases["var"])
         envar = load_case(cases["envar"])
+
+        for path in cases.values():
+            document = yaml.safe_load(path.read_text(encoding="utf-8"))
+            self.assertEqual(document["solver"]["backend"], "petsc")
 
         self.assertEqual(forward.format, "femx-cfd-forward")
         self.assertEqual(forward.resolved["solver"]["backend"], "petsc")
