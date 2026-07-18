@@ -6,16 +6,16 @@ from pathlib import Path
 from unittest import mock
 
 from femx_cfd.cases import load_case
-from femx_cfd.cli import run_cli
+from femx_cfd.cli import _example_cases, run_cli
 
 
 class ExampleRunnerTest(unittest.TestCase):
     def test_bundled_cases_use_the_public_formats(self):
-        root = Path(__file__).resolve().parents[2] / "femx_cfd" / "examples"
+        cases = _example_cases()
 
-        forward = load_case(root / "forward/straight_tube/case.yaml")
-        var = load_case(root / "inverse/straight_tube/var.yaml")
-        envar = load_case(root / "inverse/straight_tube/envar.yaml")
+        forward = load_case(cases["forward"])
+        var = load_case(cases["var"])
+        envar = load_case(cases["envar"])
 
         self.assertEqual(forward.format, "femx-cfd-forward")
         self.assertEqual(var.resolved["method"], "var")

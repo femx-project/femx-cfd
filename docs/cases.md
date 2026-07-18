@@ -60,10 +60,11 @@ initialization:
 ```
 
 The `femx-cfd example` subcommand selects one of the canonical complete cases
-packaged under `femx_cfd/examples`:
+under the source repository's `examples` directory. These files are also
+bundled with installed distributions:
 
 ```text
-femx_cfd/examples/
+examples/
 ├── forward/straight_tube/case.yaml
 └── inverse/straight_tube/
     ├── var.yaml

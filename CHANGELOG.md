@@ -24,6 +24,8 @@
 - Forwarded named backend options from portable forward cases to femx solvers.
 - Moved synthetic mesh and observation generation helpers from the installed
   package to `tools/synthetic`.
+- Moved canonical example sources to the repository-level `examples` directory
+  and made CLI discovery manifest-driven.
 
 ### Removed
 

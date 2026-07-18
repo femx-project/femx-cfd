@@ -9,13 +9,7 @@ from femx_cfd.cases import INVERSE_FORMAT, load_case, snapshot_case
 from femx_cfd.cases.inverse import validate_inverse_case
 
 
-EXAMPLE = (
-    Path(__file__).resolve().parents[2]
-    / "femx_cfd"
-    / "examples"
-    / "inverse"
-    / "straight_tube"
-)
+EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "inverse" / "straight_tube"
 
 
 class InverseCaseTest(unittest.TestCase):

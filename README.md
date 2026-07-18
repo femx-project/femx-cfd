@@ -39,8 +39,8 @@ femx-cfd example envar
 
 Each command runs a bundled, self-contained example. Results are written below
 `run/` by default, for example `run/var-example/`.
-The `example` subcommand selects case files packaged under
-`femx_cfd/examples/`; it does not refer to an `example/` working directory.
+The canonical case files live under the source repository's `examples/`
+directory and are bundled with installed distributions.
 
 ## Portable cases
 

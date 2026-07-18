@@ -172,7 +172,6 @@ def main() -> None:
         type=Path,
         default=(
             Path(__file__).resolve().parents[1]
-            / "femx_cfd"
             / "examples"
             / "inverse"
             / "straight_tube"
