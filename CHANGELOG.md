@@ -26,6 +26,9 @@
   package to `tools/synthetic`.
 - Moved canonical example sources to the repository-level `examples` directory
   and made CLI discovery manifest-driven.
+- Changed bundled examples to exercise the default PETSc solver backend.
+- Kept PETSc reusable after Python API case runs while retaining process-owned
+  finalization in CLI execution.
 
 ### Removed
 

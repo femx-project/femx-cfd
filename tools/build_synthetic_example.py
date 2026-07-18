@@ -50,7 +50,6 @@ def _base_case(method: str) -> dict[str, object]:
         "boundary_conditions": _portable_boundaries(),
         "observations": {"kind": "velocity", "path": "observations.h5"},
         "initialization": {"inlet": {"source": "file", "path": "initial_inlet.h5"}},
-        "solver": {"backend": "dense"},
     }
     if method == "var":
         case["algorithm"] = {

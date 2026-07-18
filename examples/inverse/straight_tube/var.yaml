@@ -27,8 +27,6 @@ initialization:
   inlet:
     source: file
     path: initial_inlet.h5
-solver:
-  backend: dense
 algorithm:
   optimizer: scipy
   max_iterations: 3

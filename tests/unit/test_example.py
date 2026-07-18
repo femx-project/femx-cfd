@@ -18,8 +18,11 @@ class ExampleRunnerTest(unittest.TestCase):
         envar = load_case(cases["envar"])
 
         self.assertEqual(forward.format, "femx-cfd-forward")
+        self.assertEqual(forward.resolved["solver"]["backend"], "petsc")
         self.assertEqual(var.resolved["method"], "var")
+        self.assertEqual(var.resolved["solver"]["backend"], "petsc")
         self.assertEqual(envar.resolved["method"], "envar")
+        self.assertEqual(envar.resolved["solver"]["backend"], "petsc")
 
     def test_example_dispatches_through_the_generic_runner(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -29,6 +32,7 @@ class ExampleRunnerTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(Path(run.call_args.args[0]).name, "var.yaml")
         self.assertEqual(run.call_args.kwargs["progress_kind"], "console")
+        self.assertTrue(run.call_args.kwargs["finalize_runtime"])
 
 
 if __name__ == "__main__":

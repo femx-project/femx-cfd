@@ -17,7 +17,7 @@ def square(value):
 
 
 class ParallelEnsembleTest(unittest.TestCase):
-    def test_petsc_runtime_uses_world_and_finalizes(self):
+    def test_petsc_runtime_uses_world_collects_and_finalizes(self):
         with ExitStack() as stack:
             stack.enter_context(
                 patch(
@@ -37,6 +37,7 @@ class ParallelEnsembleTest(unittest.TestCase):
             finalize = stack.enter_context(
                 patch("femx_cfd.runtime.parallel.femx.petsc_finalize")
             )
+            collect = stack.enter_context(patch("femx_cfd.runtime.parallel.gc.collect"))
             runtime = for_case({"solver": {"backend": "petsc"}})
             runtime.barrier()
             runtime.finalize()
@@ -44,7 +45,18 @@ class ParallelEnsembleTest(unittest.TestCase):
         self.assertEqual(runtime, Runtime("petsc", rank=1, size=3))
         self.assertFalse(runtime.is_root)
         barrier.assert_called_once_with()
+        collect.assert_called_once_with()
         finalize.assert_called_once_with()
+
+    def test_collect_does_not_finalize_reusable_petsc(self):
+        with (
+            patch("femx_cfd.runtime.parallel.gc.collect") as collect,
+            patch("femx_cfd.runtime.parallel.femx.petsc_finalize") as finalize,
+        ):
+            Runtime("petsc").collect()
+
+        collect.assert_called_once_with()
+        finalize.assert_not_called()
 
     def test_mpi_petsc_uses_one_ensemble_worker(self):
         messages = []

@@ -29,6 +29,8 @@ python -m pip install \
 python -m pip install -e .
 ```
 
+PETSc is the default solver backend.
+
 ## Examples
 
 ```shell

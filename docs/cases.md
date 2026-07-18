@@ -9,6 +9,7 @@ femx-cfd run case.yaml --output result
 
 The `format` field selects the workflow family. The `version` field versions
 that family's configuration schema independently from the Python package.
+The solver backend defaults to `petsc` when `solver.backend` is omitted.
 
 ## Forward cases
 

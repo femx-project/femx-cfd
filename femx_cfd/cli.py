@@ -127,6 +127,7 @@ def _execute_run(
             loaded.path,
             args.output,
             progress_kind=args.progress,
+            finalize_runtime=True,
         )
         return 0
     except Exception as error:
