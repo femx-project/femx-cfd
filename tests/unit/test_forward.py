@@ -168,7 +168,7 @@ class ForwardCaseTest(unittest.TestCase):
     def test_passes_named_options_to_the_selected_solver(self):
         case = make_case(MESH)
         case["solver"] = {
-            "backend": "resolve-cuda",
+            "backend": "resolve",
             "options": {"solve": "fgmres", "rtol": 1.0e-9},
         }
         problem = mock.Mock()
@@ -182,13 +182,13 @@ class ForwardCaseTest(unittest.TestCase):
             ),
             mock.patch(
                 "femx_cfd.workflows.forward.femx.solver_backends",
-                return_value=("resolve-cuda",),
+                return_value=("resolve",),
             ),
         ):
             solution = solve_forward(case)
 
         problem.create_solver.assert_called_once_with(
-            "resolve-cuda",
+            "resolve",
             options={"solve": "fgmres", "rtol": 1.0e-9},
         )
         self.assertIs(solution.trajectory, mock.sentinel.trajectory)
