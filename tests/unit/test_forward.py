@@ -2,8 +2,11 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from omegaconf import OmegaConf
+import numpy as np
+
+import yaml
 
 from femx_cfd.forward import (
     CASE_FORMAT,
@@ -11,6 +14,7 @@ from femx_cfd.forward import (
     load_forward_case,
     validate_forward_case,
 )
+from femx_cfd.workflows.forward import solve_forward
 
 
 MESH = Path(__file__).resolve().parents[1] / "data" / "2d_tiny_tube.msh"
@@ -42,7 +46,10 @@ class ForwardCaseTest(unittest.TestCase):
             directory = Path(directory)
             shutil.copyfile(MESH, directory / "mesh.msh")
             case_path = directory / "case.yaml"
-            OmegaConf.save(OmegaConf.create(make_case()), case_path)
+            case_path.write_text(
+                yaml.safe_dump(make_case()),
+                encoding="utf-8",
+            )
 
             case = load_forward_case(case_path)
 
@@ -80,6 +87,34 @@ class ForwardCaseTest(unittest.TestCase):
         validated = validate_forward_case(case)
 
         self.assertEqual(validated["mesh"]["length_unit"], "mm")
+
+    def test_passes_named_options_to_the_selected_solver(self):
+        case = make_case(MESH)
+        case["solver"] = {
+            "backend": "resolve-cuda",
+            "options": {"solve": "fgmres", "rtol": 1.0e-9},
+        }
+        problem = mock.Mock()
+        solver = problem.create_solver.return_value
+        solver.solve.return_value = mock.sentinel.trajectory
+
+        with (
+            mock.patch(
+                "femx_cfd.workflows.forward._make_forward_problem",
+                return_value=(problem, np.asarray([1.0])),
+            ),
+            mock.patch(
+                "femx_cfd.workflows.forward.femx.solver_backends",
+                return_value=("resolve-cuda",),
+            ),
+        ):
+            solution = solve_forward(case)
+
+        problem.create_solver.assert_called_once_with(
+            "resolve-cuda",
+            options={"solve": "fgmres", "rtol": 1.0e-9},
+        )
+        self.assertIs(solution.trajectory, mock.sentinel.trajectory)
 
 
 if __name__ == "__main__":

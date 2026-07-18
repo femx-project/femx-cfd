@@ -29,9 +29,30 @@ python -m pip install \
 python -m pip install -e .
 ```
 
-## Pulsatile-flow demo
+## Examples
 
 ```shell
-femx-var-demo
-femx-envar-demo
+femx-cfd example forward
+femx-cfd example var
+femx-cfd example envar
 ```
+
+Each command runs a bundled, self-contained example. Results are written below
+`run/` by default, for example `run/var-example/`.
+The `example` subcommand selects case files packaged under
+`femx_cfd/examples/`; it does not refer to an `example/` working directory.
+
+## Portable cases
+
+Validate or run a case generated elsewhere:
+
+```shell
+femx-cfd validate path/to/case.yaml
+femx-cfd run path/to/case.yaml --output path/to/result
+```
+
+Use `--progress json` for newline-delimited machine-readable progress.
+`femx-forward` remains available as a compatibility alias for forward cases.
+
+See [docs/cases.md](docs/cases.md) for the supported case families and output
+contract.

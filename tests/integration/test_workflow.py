@@ -6,12 +6,12 @@ import femx
 import h5py
 import numpy as np
 
-from apps.common.artifacts import write_truth
 from femx_cfd import (
     EnVar,
     VelocityData,
     make_velocity_obs,
 )
+from femx_cfd.runtime.output import write_truth
 
 
 class EnVarWorkflowTest(unittest.TestCase):

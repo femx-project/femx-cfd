@@ -4,7 +4,7 @@ import unittest
 from contextlib import ExitStack
 from unittest.mock import patch
 
-from apps.common.parallel import Runtime, for_case
+from femx_cfd.runtime.parallel import Runtime, for_case
 from femx_cfd.models.navier_stokes.ensemble import (
     _ensemble_workers,
     _parallel_map,
@@ -21,21 +21,21 @@ class ParallelEnsembleTest(unittest.TestCase):
         with ExitStack() as stack:
             stack.enter_context(
                 patch(
-                    "apps.common.parallel.femx.petsc_rank",
+                    "femx_cfd.runtime.parallel.femx.petsc_rank",
                     return_value=1,
                 )
             )
             stack.enter_context(
                 patch(
-                    "apps.common.parallel.femx.petsc_size",
+                    "femx_cfd.runtime.parallel.femx.petsc_size",
                     return_value=3,
                 )
             )
             barrier = stack.enter_context(
-                patch("apps.common.parallel.femx.petsc_barrier")
+                patch("femx_cfd.runtime.parallel.femx.petsc_barrier")
             )
             finalize = stack.enter_context(
-                patch("apps.common.parallel.femx.petsc_finalize")
+                patch("femx_cfd.runtime.parallel.femx.petsc_finalize")
             )
             runtime = for_case({"solver": {"backend": "petsc"}})
             runtime.barrier()

@@ -1,0 +1,38 @@
+format: femx-cfd-inverse
+version: 1
+method: envar
+mesh:
+  path: mesh.msh
+  length_unit: m
+fluid:
+  rho: 1.0
+  mu: 0.01
+time:
+  period: 1.0
+  dt: 0.25
+  end_time: 1.0
+control:
+  boundary: inlet
+  kind: normal
+boundary_conditions:
+- boundary: wall
+  kind: no_slip
+- boundary: outlet
+  kind: pressure
+  value: 0.0
+observations:
+  kind: velocity
+  path: observations.h5
+initialization:
+  inlet:
+    source: file
+    path: initial_inlet.h5
+solver:
+  backend: dense
+algorithm:
+  prior_weight: 0.25
+ensemble:
+  workers: 1
+  mode_scales:
+    flow_mean: 0.2
+    flow_sin1: 0.2

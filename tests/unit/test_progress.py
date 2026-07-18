@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from apps.common.progress import (
+from femx_cfd.runtime.progress import (
     ConsoleProgress,
     JsonProgress,
     NullProgress,
@@ -72,6 +72,24 @@ class ConsoleProgressTest(unittest.TestCase):
         self.assertIn("\r\033[Kadjoint", stream.getvalue())
         self.assertIn("2/4", stream.getvalue())
 
+    def test_scipy_evaluations_are_not_labeled_as_iterations(self):
+        stream = io.StringIO()
+        prog = ConsoleProgress(stream)
+
+        prog(
+            {
+                "type": "optimizer",
+                "iteration": 5,
+                "max_iterations": 3,
+                "iteration_kind": "evaluation",
+                "objective": 1.25,
+                "gradient_norm": 0.5,
+            }
+        )
+
+        self.assertIn("eval    5", stream.getvalue())
+        self.assertNotIn("5/3", stream.getvalue())
+
 
 class JsonProgressTest(unittest.TestCase):
     def test_writes_stage_and_solver_events_as_json_lines(self):
@@ -95,6 +113,15 @@ class JsonProgressTest(unittest.TestCase):
                 {"type": "solve", "step": 1, "total": 2},
             ],
         )
+
+    def test_writes_numpy_arrays_in_optimizer_events(self):
+        stream = io.StringIO()
+        prog = JsonProgress(stream)
+
+        prog({"type": "optimizer", "param": np.asarray([1.0, 2.0])})
+
+        event = json.loads(stream.getvalue())
+        self.assertEqual(event["param"], [1.0, 2.0])
 
 
 if __name__ == "__main__":
