@@ -19,14 +19,24 @@ class ExampleRunnerTest(unittest.TestCase):
         var = load_case(cases["var"])
         envar = load_case(cases["envar"])
 
-        for path in cases.values():
-            document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        documents = {
+            name: yaml.safe_load(path.read_text(encoding="utf-8"))
+            for name, path in cases.items()
+        }
+        for document in documents.values():
             self.assertEqual(document["solver"]["backend"], "petsc")
+            self.assertEqual(
+                {condition["kind"] for condition in document["boundary_conditions"]},
+                {"pressure", "velocity"},
+            )
 
         self.assertEqual(forward.format, "femx-cfd-forward")
+        self.assertEqual(documents["forward"]["version"], 2)
         self.assertEqual(forward.resolved["solver"]["backend"], "petsc")
+        self.assertEqual(documents["var"]["version"], 1)
         self.assertEqual(var.resolved["method"], "var")
         self.assertEqual(var.resolved["solver"]["backend"], "petsc")
+        self.assertEqual(documents["envar"]["version"], 1)
         self.assertEqual(envar.resolved["method"], "envar")
         self.assertEqual(envar.resolved["solver"]["backend"], "petsc")
 

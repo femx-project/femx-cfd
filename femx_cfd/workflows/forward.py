@@ -10,6 +10,8 @@ from femx_cfd.mesh import mesh_in_meters
 from femx_cfd.models.navier_stokes.problem import make_problem
 from femx_cfd.prep.inlet import analytic_inlet, inlet_normal, repeat_inlet
 
+from .boundaries import fixed_conditions
+
 
 @dataclass(frozen=True)
 class ForwardSolution:
@@ -17,26 +19,6 @@ class ForwardSolution:
 
     model: Dynamic
     trajectory: Dynamic
-
-
-def _fixed_conditions(case: Config, dimension: int) -> list[Config]:
-    conditions = []
-    for condition in case["boundary_conditions"]:
-        if condition["kind"] == "no_slip":
-            field = "velocity"
-            value = [0.0] * dimension
-        else:
-            field = "pressure"
-            value = condition["value"]
-        conditions.append(
-            {
-                "boundary": condition["boundary"],
-                "field": field,
-                "space": {"kind": "uniform", "value": value},
-                "time": {"kind": "uniform"},
-            }
-        )
-    return conditions
 
 
 def _make_forward_problem(case: Config) -> tuple[Dynamic, np.ndarray]:
@@ -81,7 +63,7 @@ def _make_forward_problem(case: Config) -> tuple[Dynamic, np.ndarray]:
             "time": {"dt": case["time"]["dt"]},
             "simulation": {"end_time": case["time"]["end_time"]},
             "control": {"boundary": boundary, "kind": "normal"},
-            "bc": _fixed_conditions(case, mesh.dimension),
+            "bc": fixed_conditions(case, mesh.dimension),
         }
         problem = make_problem(
             problem_case,

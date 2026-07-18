@@ -1,3 +1,5 @@
+import contextlib
+import io
 import shutil
 import tempfile
 import unittest
@@ -14,6 +16,8 @@ from femx_cfd import (
     load_forward_case,
     validate_forward_case,
 )
+from femx_cfd.cases import load_case
+from femx_cfd.cli import run_cli
 from femx_cfd.workflows.forward import solve_forward
 
 
@@ -33,7 +37,7 @@ def make_case(mesh="mesh.msh"):
             "profile": {"kind": "uniform", "value": 0.1},
         },
         "boundary_conditions": [
-            {"boundary": "wall", "kind": "no_slip"},
+            {"boundary": "wall", "kind": "velocity", "value": [0.0, 0.0]},
             {"boundary": "outlet", "kind": "pressure", "value": 0.0},
         ],
         "solver": {"backend": "dense"},
@@ -41,6 +45,79 @@ def make_case(mesh="mesh.msh"):
 
 
 class ForwardCaseTest(unittest.TestCase):
+    def test_migrates_version_1_no_slip_to_explicit_velocity(self):
+        case = make_case(MESH)
+        case["version"] = 1
+        case["boundary_conditions"][0] = {
+            "boundary": "wall",
+            "kind": "no_slip",
+        }
+        case["boundary_conditions"][1].pop("value")
+
+        validated = validate_forward_case(case)
+
+        self.assertEqual(validated["version"], 2)
+        self.assertEqual(
+            validated["boundary_conditions"][0],
+            {
+                "boundary": "wall",
+                "kind": "velocity",
+                "value": [0.0, 0.0],
+            },
+        )
+        self.assertEqual(case["version"], 1)
+        self.assertEqual(case["boundary_conditions"][0]["kind"], "no_slip")
+        self.assertNotIn("value", case["boundary_conditions"][1])
+        self.assertEqual(validated["boundary_conditions"][1]["value"], 0.0)
+
+    def test_reports_source_and_migrated_versions(self):
+        case = make_case(MESH)
+        case["version"] = 1
+        case["boundary_conditions"][0] = {
+            "boundary": "wall",
+            "kind": "no_slip",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            case_path = Path(directory) / "case.yaml"
+            case_path.write_text(yaml.safe_dump(case), encoding="utf-8")
+
+            loaded = load_case(case_path)
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                code = run_cli(["validate", str(case_path)])
+
+        self.assertEqual(loaded.source_version, 1)
+        self.assertEqual(loaded.version, 2)
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            stdout.getvalue().strip(),
+            "valid: femx-cfd-forward version 1 (migrates to version 2)",
+        )
+
+    def test_rejects_no_slip_in_version_2(self):
+        case = make_case(MESH)
+        case["boundary_conditions"][0] = {
+            "boundary": "wall",
+            "kind": "no_slip",
+        }
+
+        with self.assertRaisesRegex(ValueError, "velocity.*pressure"):
+            validate_forward_case(case)
+
+    def test_rejects_invalid_velocity_value(self):
+        case = make_case(MESH)
+        case["boundary_conditions"][0]["value"] = [0.0]
+
+        with self.assertRaisesRegex(ValueError, "2 or 3 finite values"):
+            validate_forward_case(case)
+
+    def test_requires_explicit_pressure_value_in_version_2(self):
+        case = make_case(MESH)
+        case["boundary_conditions"][1].pop("value")
+
+        with self.assertRaisesRegex(ValueError, "value must be finite"):
+            validate_forward_case(case)
+
     def test_loads_mesh_relative_to_case_file_and_applies_defaults(self):
         with tempfile.TemporaryDirectory() as directory:
             directory = Path(directory)

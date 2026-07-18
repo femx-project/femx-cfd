@@ -7,6 +7,8 @@
 - Added the `femx-cfd validate`, `femx-cfd run`, and `femx-cfd example`
   commands.
 - Added portable inverse case format version 1 for Var and EnVar.
+- Added forward case format version 2 with explicit fixed velocity and pressure
+  conditions, plus automatic migration from forward case version 1.
 - Added common case loading, execution, progress, MPI, and result lifecycle
   support for forward and inverse workflows.
 - Added self-contained forward, Var, and EnVar examples.
@@ -21,20 +23,24 @@
   their top-level `femx_cfd` imports.
 - Changed `femx-var` and `femx-envar` to use portable inverse cases through the
   common runner.
-- Preserved `femx-forward` as a compatibility alias for forward case version 1.
+- Preserved `femx-forward` as a compatibility alias for portable forward cases.
 - Replaced Hydra/OmegaConf case loading with plain versioned YAML documents.
 - Forwarded named backend options from portable forward cases to femx solvers.
 - Moved synthetic mesh and observation generation helpers from the installed
   package to `tools/synthetic`.
 - Moved canonical example sources to the repository-level `examples` directory
   and made CLI discovery manifest-driven.
-- Changed bundled examples to exercise the default PETSc solver backend.
+- Changed bundled examples to select the PETSc solver backend explicitly.
+- Changed current forward and inverse cases to represent fixed boundaries as
+  explicit velocity vectors or pressure values.
 - Kept PETSc reusable after Python API case runs while retaining process-owned
   finalization in CLI execution.
 
 ### Removed
 
 - Removed the installed top-level `apps` and `configs` packages.
+- Removed the `no_slip` preset from current case schemas and model workflows;
+  forward version 1 migration retains compatibility with existing cases.
 - Removed the redundant `femx_cfd.forward` compatibility module while
   preserving the forward API through top-level `femx_cfd` imports.
 - Removed the public `femx-mesh`, `femx-prepare`, and `femx-inlet` pipeline

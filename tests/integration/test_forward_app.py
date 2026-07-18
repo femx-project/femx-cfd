@@ -33,7 +33,11 @@ class ForwardApplicationTest(unittest.TestCase):
                     "profile": {"kind": "uniform", "value": 0.1},
                 },
                 "boundary_conditions": [
-                    {"boundary": "wall", "kind": "no_slip"},
+                    {
+                        "boundary": "wall",
+                        "kind": "velocity",
+                        "value": [0.0, 0.0],
+                    },
                     {
                         "boundary": "outlet",
                         "kind": "pressure",
@@ -88,8 +92,16 @@ class ForwardApplicationTest(unittest.TestCase):
                             "profile": {"kind": "uniform", "value": 0.1},
                         },
                         "boundary_conditions": [
-                            {"boundary": "wall", "kind": "no_slip"},
-                            {"boundary": "outlet", "kind": "pressure"},
+                            {
+                                "boundary": "wall",
+                                "kind": "velocity",
+                                "value": [0.0, 0.0],
+                            },
+                            {
+                                "boundary": "outlet",
+                                "kind": "pressure",
+                                "value": 0.0,
+                            },
                         ],
                         "solver": {"backend": "dense"},
                     },

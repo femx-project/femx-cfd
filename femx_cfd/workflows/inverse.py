@@ -13,6 +13,8 @@ from femx_cfd.mesh import mesh_in_meters
 from femx_cfd.models import navier_stokes as ns
 from femx_cfd.prep.inlet import inlet_normal, velocity_inlet
 
+from .boundaries import fixed_conditions
+
 
 @dataclass(frozen=True)
 class InverseSolution:
@@ -26,26 +28,6 @@ class InverseSolution:
     initial_inlet: InletData
 
 
-def _fixed_conditions(case: Config, dimension: int) -> list[Config]:
-    conditions = []
-    for condition in case["boundary_conditions"]:
-        if condition["kind"] == "no_slip":
-            field = "velocity"
-            value = [0.0] * dimension
-        else:
-            field = "pressure"
-            value = condition["value"]
-        conditions.append(
-            {
-                "boundary": condition["boundary"],
-                "field": field,
-                "space": {"kind": "uniform", "value": value},
-                "time": {"kind": "uniform"},
-            }
-        )
-    return conditions
-
-
 def _problem_case(case: Config, mesh_path: Path, dimension: int) -> Config:
     problem = {
         "mesh": str(mesh_path),
@@ -53,7 +35,7 @@ def _problem_case(case: Config, mesh_path: Path, dimension: int) -> Config:
         "time": {"T": case["time"]["period"], "dt": case["time"]["dt"]},
         "simulation": {"end_time": case["time"]["end_time"]},
         "control": case["control"],
-        "bc": _fixed_conditions(case, dimension),
+        "bc": fixed_conditions(case, dimension),
         "solver": case["solver"],
     }
     if case["method"] == "var":

@@ -13,16 +13,32 @@ The solver backend defaults to `petsc` when `solver.backend` is omitted.
 
 ## Forward cases
 
-Forward case version 1 uses this identity:
+Forward case version 2 uses this identity:
 
 ```yaml
 format: femx-cfd-forward
-version: 1
+version: 2
 ```
 
 It declares a mesh and its length unit, fluid properties, time integration,
 one analytic inlet, fixed boundary conditions, and solver options. Paths are
 resolved relative to the case file.
+
+Fixed boundaries declare their mathematical condition explicitly:
+
+```yaml
+boundary_conditions:
+  - boundary: wall
+    kind: velocity
+    value: [0.0, 0.0, 0.0]
+  - boundary: outlet
+    kind: pressure
+    value: 0.0
+```
+
+Velocity vectors must match the mesh dimension. Forward version 1 cases remain
+loadable; their `no_slip` boundaries are migrated to zero velocity vectors
+before version 2 validation and execution.
 
 ## Inverse cases
 
@@ -37,6 +53,8 @@ method: var
 Supported methods are `var` and `envar`. An inverse case declares the shared
 mesh, fluid, time, control boundary, fixed boundary conditions, prepared
 velocity observations, inlet initialization, solver, and method options.
+Its fixed boundaries use the same explicit velocity and pressure representation
+as forward version 2.
 
 Prepared inlet initialization references an HDF5 file:
 

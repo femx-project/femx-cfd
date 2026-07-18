@@ -22,6 +22,14 @@ class InverseCaseTest(unittest.TestCase):
         self.assertTrue(Path(case.resolved["mesh"]["path"]).is_absolute())
         self.assertTrue(Path(case.resolved["observations"]["path"]).is_file())
         self.assertEqual(case.resolved["algorithm"]["optimizer"], "scipy")
+        self.assertEqual(
+            case.resolved["boundary_conditions"][0],
+            {
+                "boundary": "wall",
+                "kind": "velocity",
+                "value": [0.0, 0.0],
+            },
+        )
 
     def test_loads_envar_ensemble_options(self):
         case = load_case(EXAMPLE / "envar.yaml")
@@ -35,6 +43,16 @@ class InverseCaseTest(unittest.TestCase):
         document["method"] = "other"
 
         with self.assertRaisesRegex(ValueError, "method"):
+            validate_inverse_case(document, base_dir=EXAMPLE)
+
+    def test_rejects_no_slip_boundary_preset(self):
+        document = yaml.safe_load((EXAMPLE / "var.yaml").read_text())
+        document["boundary_conditions"][0] = {
+            "boundary": "wall",
+            "kind": "no_slip",
+        }
+
+        with self.assertRaisesRegex(ValueError, "velocity.*pressure"):
             validate_inverse_case(document, base_dir=EXAMPLE)
 
     def test_accepts_observation_derived_initialization(self):
