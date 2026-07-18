@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.3.0 (unreleased)
+## v0.3.0
 
 ### Added
 
@@ -16,7 +16,6 @@
 
 ### Changed
 
-- Changed the development version to `0.3.0.dev0`.
 - Moved application logic into `femx_cfd.cases`, `femx_cfd.workflows`, and
   `femx_cfd.runtime`.
 - Moved the Var and EnVar implementations into `femx_cfd.da` while preserving
