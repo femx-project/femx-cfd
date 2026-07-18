@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 import femx
+import h5py
 import numpy as np
 
 from femx_cfd import (
@@ -34,6 +35,9 @@ class InletDataTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             path = Path(tmp_dir) / "inlet.h5"
             save_inlet(path, inlet)
+            with h5py.File(path) as h5:
+                self.assertNotIn("control_kind", h5.attrs)
+                self.assertIn("normal_velocity", h5["inlet"])
             loaded = load_inlet(path)
 
         self.assertEqual(loaded.boundary, "inlet")
@@ -45,6 +49,24 @@ class InletDataTest(unittest.TestCase):
         np.testing.assert_allclose(loaded.normal, [1.0, 0.0])
         np.testing.assert_array_equal(loaded.vals, inlet.vals)
         np.testing.assert_array_equal(loaded.params, [1.0, 2.0, 2.0, 3.0])
+
+    def test_rejects_legacy_femx_inv_format(self):
+        inlet = InletData(
+            boundary="inlet",
+            times=np.array([0.0, 1.0]),
+            node_ids=np.array([4]),
+            coords=np.array([[0.0, 0.0]]),
+            normal=np.array([1.0, 0.0]),
+            vals=np.array([[1.0], [1.0]]),
+        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "inlet.h5"
+            save_inlet(path, inlet)
+            with h5py.File(path, "a") as h5:
+                h5.attrs["format"] = "femx-inv"
+
+            with self.assertRaisesRegex(ValueError, "not a femx-cfd"):
+                load_inlet(path)
 
     def test_orders_parameters_for_problem_nodes(self):
         inlet = InletData(

@@ -93,7 +93,6 @@ def analytic_inlet(
     cfg: Config,
     normal: np.ndarray,
     boundary: str,
-    kind: str = "normal",
     *,
     space: Config,
     time: Config,
@@ -125,8 +124,6 @@ def analytic_inlet(
         raise ValueError("analytic inlet space kind must be 'poisson' or 'uniform'")
     vals = _waveform(times, period, time)[:, None] * profile
     active = surface.interior_node_ids
-    if kind == "vector":
-        vals = vals[:, :, None] * np.asarray(normal)
 
     return InletData(
         boundary=boundary,
@@ -137,7 +134,6 @@ def analytic_inlet(
         vals=vals[:, active],
         periodic=True,
         source="analytic",
-        kind=kind,
     )
 
 
@@ -167,7 +163,6 @@ def repeat_inlet(
         vals=np.vstack(vals),
         periodic=False,
         source=inlet.source,
-        kind=inlet.kind,
     )
 
 
@@ -213,8 +208,8 @@ def make_inlet(cfg: Config) -> InletData:
     mesh = femx.Mesh.read(cfg["mesh"])
     opts = cfg["inlet"]
     control = cfg["control"]
-    if control["kind"] not in ("normal", "vector"):
-        raise ValueError("control.kind must be 'normal' or 'vector'")
+    if control["kind"] != "normal":
+        raise ValueError("control.kind must be 'normal'")
     boundary = control["boundary"]
     surface = mesh.boundary(boundary)
     normal = inlet_normal(mesh, surface, control.get("normal", "auto"))
@@ -235,12 +230,9 @@ def make_inlet(cfg: Config) -> InletData:
             opts,
             normal,
             boundary,
-            kind=control["kind"],
             space=inlet_bc["space"],
             time=inlet_bc["time"],
         )
     if opts["source"] == "velocity":
-        if control["kind"] == "vector":
-            raise ValueError("vector inlet projection is not implemented")
         return velocity_inlet(surface, opts, normal, boundary)
     raise ValueError("inlet source must be 'analytic' or 'velocity'")

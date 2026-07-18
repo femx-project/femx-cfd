@@ -16,6 +16,12 @@
 - Added automatic inlet-normal estimation.
 - Added support for meshes declared in mm, cm, or m.
 
+### Removed
+
+- Removed compatibility with the legacy `femx-inv` HDF5 format identifier.
+- Removed the unused vector inlet-control path; prepared inlets now contain
+  normal velocity only.
+
 ### Compatibility
 
 - Requires `femx>=0.2.0,<0.3.0`.

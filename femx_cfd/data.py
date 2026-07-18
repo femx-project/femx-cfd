@@ -11,14 +11,13 @@ from femx_cfd._typing import Dynamic, PathLike
 
 
 FORMAT = "femx-cfd"
-LEGACY_FORMATS = {"femx-inv"}
 FORMAT_VERSION = 1
 H5_SUFFIXES = {".h5", ".hdf5"}
 
 
 @dataclass(frozen=True)
 class InletData:
-    """Normal or vector velocity sampled on FEM inlet nodes and time levels."""
+    """Normal velocity sampled on FEM inlet nodes and time levels."""
 
     boundary: str
     times: np.ndarray
@@ -28,7 +27,6 @@ class InletData:
     vals: np.ndarray
     periodic: bool = True
     source: str = ""
-    kind: str = "normal"
 
     def __post_init__(self) -> None:
         times = np.asarray(self.times, dtype=float)
@@ -46,13 +44,7 @@ class InletData:
             or coords.shape[1] not in (2, 3)
         ):
             raise ValueError("inlet coordinates have an incompatible shape")
-        if self.kind not in ("normal", "vector"):
-            raise ValueError("inlet kind must be 'normal' or 'vector'")
-        expected = (
-            (times.size, node_ids.size)
-            if self.kind == "normal"
-            else (times.size, node_ids.size, normal.size)
-        )
+        expected = (times.size, node_ids.size)
         if vals.shape != expected:
             raise ValueError("inlet velocity has an incompatible shape")
         if normal.size not in (2, 3) or not np.all(np.isfinite(normal)):
@@ -91,24 +83,9 @@ class InletData:
         except KeyError as error:
             raise ValueError("problem and inlet nodes do not match") from error
         vals = self.vals[:-1] if self.periodic else self.vals
-        if self.kind == "normal":
-            if len(cols) != self.node_ids.size:
-                raise ValueError("problem and inlet nodes do not match")
-            return np.ascontiguousarray(vals[:, cols]).reshape(-1)
-
-        node_ids = np.asarray(prob.ctr_mesh_node_ids, dtype=np.int64)
-        dim = self.normal.size
-        if node_ids.size != self.node_ids.size * dim:
-            raise ValueError("problem and inlet vector nodes do not match")
-        component = np.empty(node_ids.size, dtype=np.int64)
-        seen = {}
-        for idx, node in enumerate(node_ids):
-            count = seen.get(int(node), 0)
-            component[idx] = count
-            seen[int(node)] = count + 1
-        if np.any(component >= dim):
-            raise ValueError("problem has an incompatible vector control ordering")
-        return np.ascontiguousarray(vals[:, cols, component]).reshape(-1)
+        if len(cols) != self.node_ids.size:
+            raise ValueError("problem and inlet nodes do not match")
+        return np.ascontiguousarray(vals[:, cols]).reshape(-1)
 
 
 @dataclass(frozen=True)
@@ -151,7 +128,7 @@ def _write_header(h5: h5py.File, kind: str) -> None:
 
 
 def _check_header(h5: h5py.File, kind: str) -> None:
-    if h5.attrs.get("format") not in {FORMAT, *LEGACY_FORMATS}:
+    if h5.attrs.get("format") != FORMAT:
         raise ValueError("not a femx-cfd HDF5 file")
     if h5.attrs.get("format_version") != FORMAT_VERSION:
         raise ValueError("unsupported femx-cfd HDF5 format version")
@@ -236,16 +213,12 @@ def save_inlet(path: PathLike, inlet: InletData) -> None:
         h5.attrs["boundary"] = inlet.boundary
         h5.attrs["periodic"] = inlet.periodic
         h5.attrs["source"] = inlet.source
-        h5.attrs["control_kind"] = inlet.kind
         group = h5.create_group("inlet")
         group.create_dataset("times", data=inlet.times)
         group.create_dataset("node_ids", data=inlet.node_ids)
         group.create_dataset("coordinates", data=inlet.coords)
         group.create_dataset("normal", data=inlet.normal)
-        group.create_dataset(
-            "normal_velocity" if inlet.kind == "normal" else "velocity",
-            data=inlet.vals,
-        )
+        group.create_dataset("normal_velocity", data=inlet.vals)
 
 
 def load_inlet(path: PathLike) -> InletData:
@@ -253,10 +226,10 @@ def load_inlet(path: PathLike) -> InletData:
 
     with h5py.File(_path(path), "r") as h5:
         _check_header(h5, "inlet")
-        kind = str(h5.attrs.get("control_kind", "normal"))
-        value_name = "normal_velocity" if kind == "normal" else "velocity"
         group = _group(
-            h5, "inlet", {"times", "node_ids", "coordinates", "normal", value_name}
+            h5,
+            "inlet",
+            {"times", "node_ids", "coordinates", "normal", "normal_velocity"},
         )
         return InletData(
             boundary=str(h5.attrs["boundary"]),
@@ -264,8 +237,7 @@ def load_inlet(path: PathLike) -> InletData:
             node_ids=group["node_ids"][...],
             coords=group["coordinates"][...],
             normal=group["normal"][...],
-            vals=group[value_name][...],
+            vals=group["normal_velocity"][...],
             periodic=bool(h5.attrs["periodic"]),
             source=str(h5.attrs.get("source", "")),
-            kind=kind,
         )

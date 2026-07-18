@@ -228,12 +228,9 @@ def write_observations(path: PathLike, velocity: VelocityData) -> Path:
         expected_shape = velocity.vals.shape
         if h5["velocity/values"].shape != expected_shape:
             raise ValueError("velocity HDF5 data has an incompatible shape")
-        if "visualization/observations" in h5:
-            del h5["visualization/observations"]
 
     shutil.rmtree(data_dir, ignore_errors=True)
     data_dir.mkdir(parents=True)
-    heavy_file.with_name("observations.xdmf").unlink(missing_ok=True)
 
     root = ET.Element(
         "VTKFile",
