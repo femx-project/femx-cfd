@@ -1,13 +1,16 @@
 """Ensemble variational data-assimilation method."""
 
 from dataclasses import dataclass
+from typing import Callable, Optional
 
 import femx
 import numpy as np
 from scipy.optimize import lsq_linear
 
+from femx_cfd._typing import Dynamic, OptionalProgress
 
-def _bound_val(val, default):
+
+def _bound_val(val: Dynamic, default: float) -> float:
     if val is None:
         return default
     if isinstance(val, (bool, np.bool_)):
@@ -23,7 +26,7 @@ def _bound_val(val, default):
     return out
 
 
-def _bound_pair(vals):
+def _bound_pair(vals: Dynamic) -> tuple[float, float]:
     try:
         pair = tuple(vals)
     except TypeError as error:
@@ -31,19 +34,18 @@ def _bound_pair(vals):
             "each coefficient bound must be a (lower, upper) pair"
         ) from error
     if len(pair) != 2:
-        raise ValueError(
-            "each coefficient bound must be a (lower, upper) pair"
-        )
+        raise ValueError("each coefficient bound must be a (lower, upper) pair")
     return _bound_val(pair[0], -np.inf), _bound_val(pair[1], np.inf)
 
 
-def _is_bound_val(val):
-    return val is None or (
-        np.isscalar(val) and not isinstance(val, (str, bytes))
-    )
+def _is_bound_val(val: Dynamic) -> bool:
+    return val is None or (np.isscalar(val) and not isinstance(val, (str, bytes)))
 
 
-def _coeff_bounds(bounds, size):
+def _coeff_bounds(
+    bounds: Dynamic,
+    size: int,
+) -> Optional[tuple[np.ndarray, np.ndarray]]:
     if bounds is None:
         return None
     try:
@@ -71,7 +73,10 @@ def _coeff_bounds(bounds, size):
     return np.ascontiguousarray(lower), np.ascontiguousarray(upper)
 
 
-def _pred(predict, params):
+def _pred(
+    predict: Callable[[np.ndarray], np.ndarray],
+    params: np.ndarray,
+) -> np.ndarray:
     vals = np.asarray(predict(params.copy()), dtype=float)
     if vals.ndim != 1 or vals.size == 0:
         raise ValueError("predict must return a nonempty one-dimensional array")
@@ -80,7 +85,13 @@ def _pred(predict, params):
     return np.ascontiguousarray(vals)
 
 
-def _notify(prog, phase, status, step, total):
+def _notify(
+    prog: OptionalProgress,
+    phase: str,
+    status: str,
+    step: int,
+    total: int,
+) -> None:
     if prog is not None:
         prog(
             {
@@ -93,7 +104,11 @@ def _notify(prog, phase, status, step, total):
         )
 
 
-def _build_obs_basis(param_basis, predict, prog=None):
+def _build_obs_basis(
+    param_basis: Dynamic,
+    predict: Callable[[np.ndarray], np.ndarray],
+    prog: OptionalProgress = None,
+) -> Dynamic:
     if not isinstance(param_basis, femx.EnsembleBasis):
         raise TypeError("param_basis must be an EnsembleBasis")
     if not callable(predict):
@@ -140,7 +155,13 @@ class _LinearResult:
 class _LinearProblem:
     """Solve the linear observation-space problem used inside EnVar."""
 
-    def __init__(self, param_basis, obs_basis, *, prior_weight):
+    def __init__(
+        self,
+        param_basis: Dynamic,
+        obs_basis: Dynamic,
+        *,
+        prior_weight: float,
+    ) -> None:
         if not isinstance(param_basis, femx.EnsembleBasis):
             raise TypeError("param_basis must be an EnsembleBasis")
         if not isinstance(obs_basis, femx.EnsembleBasis):
@@ -156,7 +177,12 @@ class _LinearProblem:
         self._obs_basis = obs_basis
         self._prior_weight = float(prior_weight)
 
-    def solve(self, obs, std=1.0, bounds=None):
+    def solve(
+        self,
+        obs: Dynamic,
+        std: Dynamic = 1.0,
+        bounds: Dynamic = None,
+    ) -> _LinearResult:
         obs = np.asarray(obs, dtype=float)
         if obs.ndim != 1 or obs.size != self._obs_basis.value_size:
             raise ValueError("obs must match the observation basis value size")
@@ -235,15 +261,15 @@ class EnVar:
 
     def __init__(
         self,
-        prob,
-        obs,
-        param_basis,
+        prob: Dynamic,
+        obs: Dynamic,
+        param_basis: Dynamic,
         *,
-        obs_basis=None,
-        basis_forwards=0,
-        prior_weight=1.0,
-        backend="dense",
-    ):
+        obs_basis: Dynamic = None,
+        basis_forwards: int = 0,
+        prior_weight: float = 1.0,
+        backend: str = "dense",
+    ) -> None:
         if not isinstance(param_basis, femx.EnsembleBasis):
             raise TypeError("param_basis must be an EnsembleBasis")
         if obs.op.model is not prob.model:
@@ -276,41 +302,45 @@ class EnVar:
         self._obj = obs.objective(num_param=prob.num_param)
 
     @property
-    def prob(self):
+    def prob(self) -> Dynamic:
         return self._prob
 
     @property
-    def obs(self):
+    def obs(self) -> Dynamic:
         return self._obs
 
     @property
-    def param_basis(self):
+    def param_basis(self) -> Dynamic:
         return self._param_basis
 
     @property
-    def obs_basis(self):
+    def obs_basis(self) -> Dynamic:
         return self._obs_basis
 
     @property
-    def solver(self):
+    def solver(self) -> Dynamic:
         return self._solver
 
     @property
-    def backend(self):
+    def backend(self) -> str:
         return self._solver.backend
 
     @property
-    def obs_obj(self):
+    def obs_obj(self) -> Dynamic:
         return self._obj
 
     @property
-    def num_forwards(self):
+    def num_forwards(self) -> int:
         return self._basis_forwards + self._solver.num_solves
 
-    def _predict(self, params):
+    def _predict(self, params: np.ndarray) -> np.ndarray:
         return self._obs.op.predict(self._solver.solve(params))
 
-    def build_obs_basis(self, force=False, prog=None):
+    def build_obs_basis(
+        self,
+        force: bool = False,
+        prog: OptionalProgress = None,
+    ) -> Dynamic:
         if prog is not None and not callable(prog):
             raise TypeError("prog must be callable")
         if self._obs_basis is None or force:
@@ -323,7 +353,11 @@ class EnVar:
             )
         return self._obs_basis
 
-    def solve(self, prog=None, bounds=None) -> EnVarResult:
+    def solve(
+        self,
+        prog: OptionalProgress = None,
+        bounds: Dynamic = None,
+    ) -> EnVarResult:
         lin = _LinearProblem(
             self._param_basis,
             self.build_obs_basis(prog=prog),

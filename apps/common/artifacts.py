@@ -9,13 +9,17 @@ import tempfile
 import xml.etree.ElementTree as ET
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator, Optional
 
 import h5py
 import numpy as np
 
+from femx_cfd._typing import Config, Dynamic, PathLike
+from femx_cfd.data import VelocityData
+
 
 @contextmanager
-def _atomic_path(path):
+def _atomic_path(path: PathLike) -> Iterator[Path]:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o644
@@ -30,7 +34,12 @@ def _atomic_path(path):
         tmp.unlink(missing_ok=True)
 
 
-def _save_result(path, method, vals, traj):
+def _save_result(
+    path: PathLike,
+    method: str,
+    vals: Config,
+    traj: Dynamic,
+) -> None:
     with h5py.File(path, "w") as h5:
         h5.attrs["format"] = "femx-cfd"
         h5.attrs["format_version"] = 1
@@ -40,12 +49,17 @@ def _save_result(path, method, vals, traj):
         h5.create_dataset("states", data=traj.values, compression="gzip")
 
 
-def _save_metrics(group, metrics):
+def _save_metrics(group: h5py.Group, metrics: Config) -> None:
     for name, val in metrics.items():
         group.attrs[name] = val
 
 
-def bundle_result(src_result, src_xdmf, out, metrics=None):
+def bundle_result(
+    src_result: PathLike,
+    src_xdmf: PathLike,
+    out: PathLike,
+    metrics: Optional[Config] = None,
+) -> None:
     """Merge femx visualization data into the analysis result HDF5 file."""
     src_result = Path(src_result)
     src_xdmf = Path(src_xdmf)
@@ -79,7 +93,14 @@ def bundle_result(src_result, src_xdmf, out, metrics=None):
         )
 
 
-def write_result(out, model, method, vals, traj, metrics):
+def write_result(
+    out: PathLike,
+    model: Dynamic,
+    method: str,
+    vals: Config,
+    traj: Dynamic,
+    metrics: Config,
+) -> None:
     """Write ``result.h5`` and ``flow.xdmf`` for one analysis run."""
     with tempfile.TemporaryDirectory(prefix="femx-cfd-result-") as tmp_dir:
         tmp_dir = Path(tmp_dir)
@@ -90,20 +111,26 @@ def write_result(out, model, method, vals, traj, metrics):
         bundle_result(result_file, flow_file, out, metrics)
 
 
-def write_truth(path, model, traj):
+def write_truth(path: PathLike, model: Dynamic, traj: Dynamic) -> None:
     """Write the complete synthetic truth trajectory as HDF5/XDMF."""
 
     model.write_xdmf(Path(path).with_suffix(".xdmf"), traj)
 
 
-def _vtk_binary(values, dtype):
+def _vtk_binary(values: np.ndarray, dtype: Dynamic) -> str:
     values = np.ascontiguousarray(values, dtype=np.dtype(dtype))
     payload = values.tobytes()
     header = struct.pack("<Q", len(payload))
     return base64.b64encode(header + payload).decode("ascii")
 
 
-def _vtk_data(parent, values, vtk_type, dtype, **attrs):
+def _vtk_data(
+    parent: ET.Element,
+    values: np.ndarray,
+    vtk_type: str,
+    dtype: Dynamic,
+    **attrs: str,
+) -> None:
     data = ET.SubElement(
         parent,
         "DataArray",
@@ -114,7 +141,11 @@ def _vtk_data(parent, values, vtk_type, dtype, **attrs):
     data.text = _vtk_binary(values, dtype)
 
 
-def _write_observation_vtu(path, points, values):
+def _write_observation_vtu(
+    path: PathLike,
+    points: np.ndarray,
+    values: np.ndarray,
+) -> None:
     num_points, dimension = points.shape
     points_3d = np.zeros((num_points, 3))
     values_3d = np.zeros((num_points, 3))
@@ -187,7 +218,7 @@ def _write_observation_vtu(path, points, values):
         )
 
 
-def write_observations(path, velocity):
+def write_observations(path: PathLike, velocity: VelocityData) -> Path:
     """Write binary VTU point clouds and their ParaView time-series index."""
     heavy_file = Path(path)
     pvd_file = heavy_file.with_name("observations.pvd")

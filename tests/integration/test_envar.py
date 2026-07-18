@@ -9,9 +9,7 @@ from femx_cfd.envar import _LinearProblem, _build_obs_basis
 
 class FemxControlledEnVarIntegrationTest(unittest.TestCase):
     def test_recovers_a_ctr_mode(self):
-        mesh_file = (
-            Path(__file__).resolve().parents[1] / "data" / "2d_tiny_tube.msh"
-        )
+        mesh_file = Path(__file__).resolve().parents[1] / "data" / "2d_tiny_tube.msh"
         model = femx.NavierStokesModel(
             mesh_file,
             num_steps=3,

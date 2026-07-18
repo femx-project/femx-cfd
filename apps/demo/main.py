@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from typing import Optional
 
 
 _COMMON_STEPS = (
@@ -26,7 +27,10 @@ _ANALYSIS_STEPS = {
 _RULE = "=" * 64
 
 
-def commands(analysis, python=None):
+def commands(
+    analysis: str,
+    python: Optional[str] = None,
+) -> list[tuple[str, list[str]]]:
     """Return the subprocess commands used by one analysis demo."""
     try:
         analysis_step = _ANALYSIS_STEPS[analysis]
@@ -51,21 +55,18 @@ def commands(analysis, python=None):
     ]
 
 
-def _run(analysis):
+def _run(analysis: str) -> int:
     name = f"femx-{analysis}-demo"
     steps = commands(analysis)
     for index, (label, command) in enumerate(steps, start=1):
         print(
-            f"\n{_RULE}\n"
-            f"{name}  [{index}/{len(steps)}]  {label}\n"
-            f"{_RULE}\n",
+            f"\n{_RULE}\n{name}  [{index}/{len(steps)}]  {label}\n{_RULE}\n",
             flush=True,
         )
         result = subprocess.run(command, check=False)
         if result.returncode:
             print(
-                f"\n{name}: {label} failed "
-                f"(exit code {result.returncode})\n",
+                f"\n{name}: {label} failed (exit code {result.returncode})\n",
                 flush=True,
             )
             return result.returncode
@@ -75,12 +76,12 @@ def _run(analysis):
     return 0
 
 
-def var_main():
+def var_main() -> int:
     """Run preparation followed by Var."""
     return _run("var")
 
 
-def envar_main():
+def envar_main() -> int:
     """Run preparation followed by EnVar."""
     return _run("envar")
 

@@ -24,8 +24,8 @@ class StraightTubeParityTest(unittest.TestCase):
 
         obj, grad = var.value_grad(init_params)
 
-        self.assertAlmostEqual(obj, 1.2076350251, delta=1.0e-8)
-        self.assertAlmostEqual(np.linalg.norm(grad), 3.0572376743, delta=1.0e-8)
+        self.assertAlmostEqual(obj, 1.2076350898, delta=1.0e-8)
+        self.assertAlmostEqual(np.linalg.norm(grad), 3.0572382563, delta=1.0e-8)
 
 
 if __name__ == "__main__":

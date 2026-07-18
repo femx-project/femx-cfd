@@ -7,6 +7,7 @@ from multiprocessing import get_context
 import femx
 import numpy as np
 
+from femx_cfd._typing import Config, Dynamic, ReportCallback
 from femx_cfd.data import make_velocity_obs
 
 from .problem import make_problem
@@ -20,7 +21,7 @@ class Spinup:
     ctr_modes: np.ndarray
 
 
-def _surface_mode(prob, index):
+def _surface_mode(prob: Dynamic, index: int) -> np.ndarray:
     """Return a normalized Dirichlet surface mode on active control nodes."""
     surface = prob.model.mesh.boundary(prob.ctr.boundary)
     local = {int(node): idx for idx, node in enumerate(surface.mesh_node_ids)}
@@ -30,7 +31,9 @@ def _surface_mode(prob, index):
             dtype=np.int64,
         )
     except KeyError as error:
-        raise RuntimeError("control node is not part of its boundary surface") from error
+        raise RuntimeError(
+            "control node is not part of its boundary surface"
+        ) from error
     _, modes = surface.laplacian_modes(index + 1)
     values = np.asarray(modes[active, index], dtype=float)
     scale = np.max(np.abs(values))
@@ -39,7 +42,11 @@ def _surface_mode(prob, index):
     return values / scale
 
 
-def _analytic_ctr_modes(cfg, prob, ctr_mean):
+def _analytic_ctr_modes(
+    cfg: Config,
+    prob: Dynamic,
+    ctr_mean: np.ndarray,
+) -> tuple[list[str], np.ndarray]:
     times = np.asarray(prob.ctr.times)[: prob.num_ctr_levels]
     T = cfg["time"]["T"]
     omega = 2.0 * np.pi / T
@@ -79,7 +86,11 @@ def _analytic_ctr_modes(cfg, prob, ctr_mean):
     return names, np.column_stack(modes)
 
 
-def _init_modes_from_states(prob, mean, states):
+def _init_modes_from_states(
+    prob: Dynamic,
+    mean: np.ndarray,
+    states: list[np.ndarray],
+) -> np.ndarray:
     modes = np.column_stack([state - mean for state in states])
     vel = np.zeros(prob.model.num_states, dtype=bool)
     vel[np.asarray(prob.model.velocity_dofs)] = True
@@ -89,7 +100,13 @@ def _init_modes_from_states(prob, mean, states):
     return np.ascontiguousarray(modes)
 
 
-def _parallel_map(func, args, names, workers, report):
+def _parallel_map(
+    func: Dynamic,
+    args: Dynamic,
+    names: list[str],
+    workers: int,
+    report: ReportCallback,
+) -> list[Dynamic]:
     if workers <= 0:
         raise ValueError("ensemble.workers must be positive")
 
@@ -108,10 +125,7 @@ def _parallel_map(func, args, names, workers, report):
         max_workers=workers,
         mp_context=get_context("spawn"),
     ) as pool:
-        futures = {
-            pool.submit(func, *arg): idx
-            for idx, arg in enumerate(args)
-        }
+        futures = {pool.submit(func, *arg): idx for idx, arg in enumerate(args)}
 
         for done, future in enumerate(as_completed(futures), start=1):
             idx = futures[future]
@@ -121,7 +135,7 @@ def _parallel_map(func, args, names, workers, report):
     return results
 
 
-def _ensemble_workers(cfg, report):
+def _ensemble_workers(cfg: Config, report: ReportCallback) -> int:
     workers = int(cfg["ensemble"].get("workers", 1))
     if workers <= 0:
         raise ValueError("ensemble.workers must be positive")
@@ -136,7 +150,11 @@ def _ensemble_workers(cfg, report):
     return workers
 
 
-def _spinup_state(cfg, inlet, params):
+def _spinup_state(
+    cfg: Config,
+    inlet: Dynamic,
+    params: np.ndarray,
+) -> np.ndarray:
     prob = make_problem(
         cfg,
         times=inlet.times,
@@ -147,7 +165,11 @@ def _spinup_state(cfg, inlet, params):
     return solver.solve(params).values[-1]
 
 
-def build_ensemble(cfg, inlet, report=lambda _message: None):
+def build_ensemble(
+    cfg: Config,
+    inlet: Dynamic,
+    report: ReportCallback = lambda _message: None,
+) -> Spinup:
     """Run spin-up members and build initial-state and inlet modes."""
 
     prob = make_problem(
@@ -159,10 +181,7 @@ def build_ensemble(cfg, inlet, report=lambda _message: None):
     ctr_mean = inlet.params_for(prob)
     names, ctr_modes = _analytic_ctr_modes(cfg, prob, ctr_mean)
     params = [ctr_mean]
-    params.extend(
-        ctr_mean + ctr_modes[:, idx]
-        for idx in range(len(names))
-    )
+    params.extend(ctr_mean + ctr_modes[:, idx] for idx in range(len(names)))
 
     labels = ["spin-up mean", *(f"spin-up {name}" for name in names)]
     workers = _ensemble_workers(cfg, report)
@@ -193,7 +212,13 @@ def build_ensemble(cfg, inlet, report=lambda _message: None):
     )
 
 
-def _obs_prediction(cfg, inlet, spin, velocity, params):
+def _obs_prediction(
+    cfg: Config,
+    inlet: Dynamic,
+    spin: Spinup,
+    velocity: Dynamic,
+    params: np.ndarray,
+) -> np.ndarray:
     prob = make_problem(
         cfg,
         times=inlet.times,
@@ -209,13 +234,13 @@ def _obs_prediction(cfg, inlet, spin, velocity, params):
 
 
 def build_obs_basis(
-    cfg,
-    inlet,
-    spin,
-    velocity,
-    param_basis,
-    report=lambda _message: None,
-):
+    cfg: Config,
+    inlet: Dynamic,
+    spin: Spinup,
+    velocity: Dynamic,
+    param_basis: Dynamic,
+    report: ReportCallback = lambda _message: None,
+) -> Dynamic:
     """Build the EnVar observation basis with parallel forward solves."""
 
     mean = param_basis.mean
@@ -224,14 +249,8 @@ def build_obs_basis(
     params.extend(mean + modes[:, col] for col in range(modes.shape[1]))
 
     labels = ["observation mean"]
-    labels.extend(
-        f"observation member {idx + 1}"
-        for idx in range(modes.shape[1])
-    )
-    args = [
-        (cfg, inlet, spin, velocity, param)
-        for param in params
-    ]
+    labels.extend(f"observation member {idx + 1}" for idx in range(modes.shape[1]))
+    args = [(cfg, inlet, spin, velocity, param) for param in params]
     predictions = _parallel_map(
         _obs_prediction,
         args,
@@ -241,13 +260,15 @@ def build_obs_basis(
     )
 
     mean_pred = predictions[0]
-    obs_modes = np.column_stack(
-        [pred - mean_pred for pred in predictions[1:]]
-    )
+    obs_modes = np.column_stack([pred - mean_pred for pred in predictions[1:]])
     return femx.EnsembleBasis(mean_pred, obs_modes)
 
 
-def make_param_basis(prob, ctr_mean, ctr_modes):
+def make_param_basis(
+    prob: Dynamic,
+    ctr_mean: np.ndarray,
+    ctr_modes: np.ndarray,
+) -> Dynamic:
     """Combine initial-state and inlet modes into one affine basis."""
 
     count = ctr_modes.shape[1]

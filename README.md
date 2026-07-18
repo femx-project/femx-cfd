@@ -63,6 +63,69 @@ CMAKE_PREFIX_PATH=/path/to/resolve \
   -Ccmake.define.FEMX_ENABLE_RESOLVE=ON
 ```
 
+## Forward simulation
+
+`femx-forward` runs one portable YAML case. Mesh paths are resolved relative to
+the case file, so Studio can place `case.yaml` and `mesh.msh` in the same job
+directory. `mesh.length_unit` declares how the stored coordinates are
+interpreted; the solver converts `mm` and `cm` meshes to SI meters before
+assembly:
+
+```yaml
+format: femx-cfd-forward
+version: 1
+mesh:
+  path: mesh.msh
+  length_unit: mm
+
+fluid:
+  rho: 1050.0
+  mu: 0.0035
+
+time:
+  dt: 0.001
+  end_time: 0.1
+
+inlet:
+  boundary: inlet
+  normal: auto
+  profile:
+    kind: poisson
+    peak: 0.2
+  waveform:
+    kind: uniform
+    value: 1.0
+
+boundary_conditions:
+  - boundary: wall
+    kind: no_slip
+  - boundary: outlet
+    kind: pressure
+    value: 0.0
+
+solver:
+  backend: petsc
+  petsc_options: -ksp_type fgmres -pc_type bjacobi -sub_pc_type ilu
+```
+
+Run the case with:
+
+```shell
+femx-forward case.yaml
+```
+
+The default `result` directory contains the resolved `case.yaml`,
+`status.json`, `result.json`, `flow.xdmf`, and `flow.h5`. GUI and job-runner
+clients can request newline-delimited JSON progress on standard output:
+
+```shell
+femx-forward case.yaml --progress json
+```
+
+The case format and result manifest are the runtime interface used by
+femx-studio. Studio launches this command in a separate Conda environment; it
+does not import PETSc or femx-cfd into the Qt process.
+
 ## Pulsatile-flow demo
 
 The demo assimilates sparse velocity observations in a rectangular channel to estimate its pulsatile inlet velocity. Run each stage separately:

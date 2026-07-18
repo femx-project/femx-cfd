@@ -80,10 +80,8 @@ class AnalyticInletTest(unittest.TestCase):
         space = {"kind": "poisson", "peak": 2.0}
         time = {
             "kind": "harmonics",
-                "mean": 1.0,
-                "terms": [
-                    {"kind": "sin", "order": 1, "amplitude": 0.5}
-                ],
+            "mean": 1.0,
+            "terms": [{"kind": "sin", "order": 1, "amplitude": 0.5}],
         }
 
         inlet = analytic_inlet(

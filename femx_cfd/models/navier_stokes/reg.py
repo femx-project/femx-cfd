@@ -6,15 +6,17 @@ import femx
 import numpy as np
 from scipy import sparse
 
+from femx_cfd._typing import Dynamic
 
-def _weight(val, name):
+
+def _weight(val: float, name: str) -> float:
     val = float(val)
     if not np.isfinite(val) or val < 0.0:
         raise ValueError(f"{name} must be finite and nonnegative")
     return val
 
 
-def _params(vals, size, name):
+def _params(vals: Dynamic, size: int, name: str) -> np.ndarray:
     arr = np.asarray(vals, dtype=float)
     if arr.size != size:
         raise ValueError(f"{name} must contain {size} values")
@@ -24,7 +26,12 @@ def _params(vals, size, name):
     return arr.copy()
 
 
-def _block_reg(prob, mat, weight, ref):
+def _block_reg(
+    prob: Dynamic,
+    mat: Dynamic,
+    weight: float,
+    ref: np.ndarray,
+) -> Dynamic:
     coo = mat.tocoo()
     levels, size = prob.param_shape
     return femx.TimeBlockRegularization(
@@ -40,7 +47,12 @@ def _block_reg(prob, mat, weight, ref):
     )
 
 
-def _full_reg(prob, mat, weight, ref):
+def _full_reg(
+    prob: Dynamic,
+    mat: Dynamic,
+    weight: float,
+    ref: np.ndarray,
+) -> Dynamic:
     coo = mat.tocoo()
     return femx.TimeBlockRegularization(
         prob.model.num_steps,
@@ -55,14 +67,16 @@ def _full_reg(prob, mat, weight, ref):
     )
 
 
-def _combined_mats(prob, stiffness, mass):
+def _combined_mats(
+    prob: Dynamic,
+    stiffness: Dynamic,
+    mass: Dynamic,
+) -> tuple[Dynamic, Dynamic, Dynamic, Dynamic]:
     levels, size = prob.param_shape
     num_init = prob.num_init_param
     init = sparse.eye(num_init, format="csr")
     zeros = sparse.csr_matrix((num_init, num_init))
-    ctr_mass = sparse.kron(
-        sparse.eye(levels, format="csr"), mass, format="csr"
-    )
+    ctr_mass = sparse.kron(sparse.eye(levels, format="csr"), mass, format="csr")
     ctr_stiffness = sparse.kron(
         sparse.eye(levels, format="csr"), stiffness, format="csr"
     )
@@ -88,7 +102,7 @@ def _combined_mats(prob, stiffness, mass):
     )
 
 
-def _ctr_mats(prob):
+def _ctr_mats(prob: Dynamic) -> tuple[Dynamic, Dynamic]:
     surface = prob.model.mesh.boundary(prob.ctr.boundary)
     local = {int(node): idx for idx, node in enumerate(surface.mesh_node_ids)}
     try:
@@ -108,7 +122,7 @@ def _ctr_mats(prob):
     )
 
 
-def _compat_mat(prob, modes):
+def _compat_mat(prob: Dynamic, modes: np.ndarray) -> Dynamic:
     modes = np.asarray(modes, dtype=float)
     expected = (prob.num_ctr_param, prob.num_init_param)
     if modes.shape != expected:
@@ -146,16 +160,16 @@ class Regularization:
 
 
 def make_reg(
-    prob,
+    prob: Dynamic,
     *,
-    bg=None,
-    bg_weight=0.0,
-    init_weight=None,
-    space_weight=0.0,
-    time_weight=0.0,
-    compat_modes=None,
-    compat_weight=0.0,
-):
+    bg: Dynamic = None,
+    bg_weight: float = 0.0,
+    init_weight: Dynamic = None,
+    space_weight: float = 0.0,
+    time_weight: float = 0.0,
+    compat_modes: Dynamic = None,
+    compat_weight: float = 0.0,
+) -> Regularization:
     """Build the spatial, temporal, and compatibility regularization."""
 
     bg = prob.param if bg is None else _params(bg, prob.num_param, "bg")

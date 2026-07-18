@@ -17,9 +17,7 @@ from femx_cfd import (
 class EnVarWorkflowTest(unittest.TestCase):
     @staticmethod
     def make_prob():
-        mesh_file = (
-            Path(__file__).resolve().parents[1] / "data" / "2d_tiny_tube.msh"
-        )
+        mesh_file = Path(__file__).resolve().parents[1] / "data" / "2d_tiny_tube.msh"
         model = femx.NavierStokesModel(
             mesh_file,
             num_steps=3,

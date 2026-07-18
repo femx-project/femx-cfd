@@ -7,6 +7,8 @@ import femx
 import h5py
 import numpy as np
 
+from femx_cfd._typing import Dynamic, PathLike
+
 
 FORMAT = "femx-cfd"
 LEGACY_FORMATS = {"femx-inv"}
@@ -28,17 +30,13 @@ class InletData:
     source: str = ""
     kind: str = "normal"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         times = np.asarray(self.times, dtype=float)
         node_ids = np.asarray(self.node_ids, dtype=np.int64)
         coords = np.asarray(self.coords, dtype=float)
         normal = np.asarray(self.normal, dtype=float)
         vals = np.asarray(self.vals, dtype=float)
-        if (
-            times.ndim != 1
-            or times.size == 0
-            or np.any(np.diff(times) <= 0.0)
-        ):
+        if times.ndim != 1 or times.size == 0 or np.any(np.diff(times) <= 0.0):
             raise ValueError("inlet times must be increasing")
         if node_ids.ndim != 1 or node_ids.size == 0:
             raise ValueError("inlet node_ids must be a nonempty vector")
@@ -76,13 +74,13 @@ class InletData:
         object.__setattr__(self, "vals", np.ascontiguousarray(vals))
 
     @property
-    def params(self):
+    def params(self) -> np.ndarray:
         """Flattened independent time levels for the configured control."""
 
         vals = self.vals[:-1] if self.periodic else self.vals
         return vals.reshape(-1).copy()
 
-    def params_for(self, prob):
+    def params_for(self, prob: Dynamic) -> np.ndarray:
         """Order the inlet values for a compatible Navier-Stokes problem."""
 
         if not np.allclose(prob.ctr.times, self.times):
@@ -121,17 +119,13 @@ class VelocityData:
     times: np.ndarray
     vals: np.ndarray
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         points = np.asarray(self.points, dtype=float)
         times = np.asarray(self.times, dtype=float)
         vals = np.asarray(self.vals, dtype=float)
         if points.ndim != 2 or points.shape[1] not in (2, 3):
             raise ValueError("velocity points must have shape (num_points, 2 or 3)")
-        if (
-            times.ndim != 1
-            or times.size == 0
-            or np.any(np.diff(times) <= 0.0)
-        ):
+        if times.ndim != 1 or times.size == 0 or np.any(np.diff(times) <= 0.0):
             raise ValueError("velocity times must be increasing")
         if vals.shape != (times.size, points.shape[0], points.shape[1]):
             raise ValueError("velocity values have an incompatible shape")
@@ -143,20 +137,20 @@ class VelocityData:
         object.__setattr__(self, "vals", np.ascontiguousarray(vals))
 
 
-def _path(path):
+def _path(path: PathLike) -> Path:
     path = Path(path)
     if path.suffix.lower() not in H5_SUFFIXES:
         raise ValueError("data path must end with .h5 or .hdf5")
     return path
 
 
-def _write_header(h5, kind):
+def _write_header(h5: h5py.File, kind: str) -> None:
     h5.attrs["format"] = FORMAT
     h5.attrs["format_version"] = FORMAT_VERSION
     h5.attrs["kind"] = kind
 
 
-def _check_header(h5, kind):
+def _check_header(h5: h5py.File, kind: str) -> None:
     if h5.attrs.get("format") not in {FORMAT, *LEGACY_FORMATS}:
         raise ValueError("not a femx-cfd HDF5 file")
     if h5.attrs.get("format_version") != FORMAT_VERSION:
@@ -165,7 +159,7 @@ def _check_header(h5, kind):
         raise ValueError(f"HDF5 data is not {kind}")
 
 
-def _group(h5, name, datasets):
+def _group(h5: h5py.File, name: str, datasets: set[str]) -> h5py.Group:
     if name not in h5 or not isinstance(h5[name], h5py.Group):
         raise ValueError(f"HDF5 data is missing group '{name}'")
     group = h5[name]
@@ -176,7 +170,7 @@ def _group(h5, name, datasets):
     return group
 
 
-def save_velocity(path, velocity):
+def save_velocity(path: PathLike, velocity: VelocityData) -> None:
     """Save discrete velocity samples in the common prepared-data format."""
 
     if not isinstance(velocity, VelocityData):
@@ -189,7 +183,7 @@ def save_velocity(path, velocity):
         group.create_dataset("values", data=velocity.vals, compression="gzip")
 
 
-def load_velocity(path):
+def load_velocity(path: PathLike) -> VelocityData:
     """Load discrete velocity samples from the common prepared-data format."""
 
     with h5py.File(_path(path), "r") as h5:
@@ -202,7 +196,7 @@ def load_velocity(path):
         )
 
 
-def make_velocity_obs(velocity, model):
+def make_velocity_obs(velocity: VelocityData, model: Dynamic) -> Dynamic:
     """Create unit-weight observations from prepared velocity samples."""
 
     components = np.arange(velocity.points.shape[1])
@@ -215,7 +209,11 @@ def make_velocity_obs(velocity, model):
     return femx.GaussianObservation(op, velocity.vals.reshape(-1), std=1.0)
 
 
-def add_velocity_noise(velocity, std, seed):
+def add_velocity_noise(
+    velocity: VelocityData,
+    std: float,
+    seed: int,
+) -> VelocityData:
     """Add reproducible independent Gaussian noise to velocity samples."""
 
     rng = np.random.default_rng(seed)
@@ -228,7 +226,7 @@ def add_velocity_noise(velocity, std, seed):
     )
 
 
-def save_inlet(path, inlet):
+def save_inlet(path: PathLike, inlet: InletData) -> None:
     """Save a prepared inlet boundary condition."""
 
     if not isinstance(inlet, InletData):
@@ -250,14 +248,16 @@ def save_inlet(path, inlet):
         )
 
 
-def load_inlet(path):
+def load_inlet(path: PathLike) -> InletData:
     """Load a prepared inlet boundary condition."""
 
     with h5py.File(_path(path), "r") as h5:
         _check_header(h5, "inlet")
         kind = str(h5.attrs.get("control_kind", "normal"))
         value_name = "normal_velocity" if kind == "normal" else "velocity"
-        group = _group(h5, "inlet", {"times", "node_ids", "coordinates", "normal", value_name})
+        group = _group(
+            h5, "inlet", {"times", "node_ids", "coordinates", "normal", value_name}
+        )
         return InletData(
             boundary=str(h5.attrs["boundary"]),
             times=group["times"][...],

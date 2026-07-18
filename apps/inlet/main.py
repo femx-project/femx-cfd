@@ -8,10 +8,11 @@ from omegaconf import DictConfig
 import femx_cfd as inv
 from apps.common import config
 from apps.common import progress
+from femx_cfd._typing import Config, Progress
 from femx_cfd.prep import inlet as inlet_prep
 
 
-def run(case, prog):
+def run(case: Config, prog: Progress) -> None:
     source = case["inlet"]["source"]
     prog.stage(f"inlet: preparing {source} boundary data")
 
@@ -29,7 +30,7 @@ def run(case, prog):
     config_path="../../configs",
     config_name="synthetic/truth_inlet",
 )
-def main(cfg: DictConfig):
+def main(cfg: DictConfig) -> None:
     case = config.to_dict(cfg.case)
     out = Path(case["inlet"]["output"]).parent
 

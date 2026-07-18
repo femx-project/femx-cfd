@@ -6,6 +6,8 @@ from typing import Optional
 
 import femx
 
+from femx_cfd._typing import Config
+
 
 @dataclass(frozen=True)
 class Runtime:
@@ -16,18 +18,18 @@ class Runtime:
     size: int = 1
 
     @property
-    def is_root(self):
+    def is_root(self) -> bool:
         return self.rank == 0
 
     @property
-    def distributed(self):
+    def distributed(self) -> bool:
         return self.size > 1
 
-    def barrier(self):
+    def barrier(self) -> None:
         if self.backend == "petsc":
             femx.petsc_barrier()
 
-    def finalize(self):
+    def finalize(self) -> None:
         if self.backend == "petsc":
             # pybind keep-alive relationships can defer PETSc object cleanup
             # until cyclic garbage collection even after an application run
@@ -36,7 +38,7 @@ class Runtime:
             femx.petsc_finalize()
 
 
-def for_case(case):
+def for_case(case: Config) -> Runtime:
     """Create the runtime after ``PETSC_OPTIONS`` has been configured."""
 
     backend = case.get("solver", {}).get("backend")

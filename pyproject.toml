@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "femx-cfd"
-version = "0.1.0"
+version = "0.2.0"
 description = "Python CFD forward, forecasting, and data-assimilation applications for femx."
 requires-python = ">=3.9"
 dependencies = [
@@ -19,11 +19,20 @@ dependencies = [
 [project.scripts]
 femx-var-demo = "apps.demo.main:var_main"
 femx-envar-demo = "apps.demo.main:envar_main"
+femx-forward = "apps.forward.main:main"
 femx-mesh = "apps.mesh.main:main"
 femx-prepare = "apps.prepare.main:main"
 femx-inlet = "apps.inlet.main:main"
 femx-envar = "apps.envar.main:main"
 femx-var = "apps.var.main:main"
+
+[project.optional-dependencies]
+lint = [
+    "ruff==0.15.22",
+]
+test = [
+    "pytest>=8",
+]
 
 [tool.setuptools]
 packages = [
@@ -36,6 +45,7 @@ packages = [
     "apps.common",
     "apps.demo",
     "apps.envar",
+    "apps.forward",
     "apps.inlet",
     "apps.mesh",
     "apps.prepare",
@@ -45,3 +55,23 @@ packages = [
 
 [tool.setuptools.package-data]
 configs = ["*.yaml", "demo/*.yaml", "synthetic/*.yaml", "vesselA/*.yaml"]
+
+[tool.pytest.ini_options]
+addopts = "--import-mode=importlib"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "ANN"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["ANN"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "lf"
