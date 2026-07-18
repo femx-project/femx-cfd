@@ -132,6 +132,4 @@ class StraightTubeMeshTest(unittest.TestCase):
 
     def test_rejects_nonpositive_dimensions_without_gmsh(self):
         with self.assertRaises(ValueError):
-            write_straight_tube(
-                "unused.msh", length=0, diameter=1, cell_size=0.05
-            )
+            write_straight_tube("unused.msh", length=0, diameter=1, cell_size=0.05)

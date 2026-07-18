@@ -12,11 +12,16 @@ from apps.common import artifacts
 from apps.common import config
 from apps.common import parallel
 from apps.common import progress
+from femx_cfd._typing import Config, Progress
 from femx_cfd.prep import mri
 from femx_cfd.prep import synthetic
 
 
-def prepare_synthetic(case, prog, runtime):
+def prepare_synthetic(
+    case: Config,
+    prog: Progress,
+    runtime: parallel.Runtime,
+) -> None:
     inlet = inv.load_inlet(case["input"])
     truth_prob, truth_params, cycles = synthetic.make_truth_problem(
         case,
@@ -68,7 +73,11 @@ def prepare_synthetic(case, prog, runtime):
         inv.save_velocity(opts["output"], noisy)
 
 
-def prepare_mri(case, prog, runtime):
+def prepare_mri(
+    case: Config,
+    prog: Progress,
+    runtime: parallel.Runtime,
+) -> None:
     if not runtime.is_root:
         return
     prog.stage("input: reading MRI velocity data")
@@ -81,7 +90,11 @@ def prepare_mri(case, prog, runtime):
     artifacts.write_observations(case["velocity"], velocity)
 
 
-def run(case, prog, runtime):
+def run(
+    case: Config,
+    prog: Progress,
+    runtime: parallel.Runtime,
+) -> None:
     if case["source"] == "synthetic":
         prepare_synthetic(case, prog, runtime)
     elif case["source"] == "mri":
@@ -95,7 +108,7 @@ def run(case, prog, runtime):
     config_path="../../configs",
     config_name="synthetic/prepare",
 )
-def main(cfg: DictConfig):
+def main(cfg: DictConfig) -> None:
     case = config.to_dict(cfg.case)
     out = Path(case["prepared"])
 

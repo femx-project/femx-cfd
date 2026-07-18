@@ -1,6 +1,7 @@
 """Run Var with prepared velocity observations."""
 
 import os
+from pathlib import Path
 
 import hydra
 from omegaconf import DictConfig
@@ -10,10 +11,16 @@ from apps.common import artifacts
 from apps.common import config
 from apps.common import parallel
 from apps.common import progress
+from femx_cfd._typing import Config, Progress
 from femx_cfd.models import navier_stokes as ns
 
 
-def run(case, out, prog, runtime):
+def run(
+    case: Config,
+    out: Path,
+    prog: Progress,
+    runtime: parallel.Runtime,
+) -> None:
     backend = case["solver"]["backend"]
     inlet = inv.load_inlet(case["inlet_file"])
 
@@ -101,11 +108,9 @@ def run(case, out, prog, runtime):
 
 
 @hydra.main(
-    version_base="1.3",
-    config_path="../../configs",
-    config_name="synthetic/var",
+    version_base="1.3", config_path="../../configs", config_name="synthetic/var"
 )
-def main(cfg: DictConfig):
+def main(cfg: DictConfig) -> None:
     case = config.to_dict(cfg.case)
     out = config.analysis_output(case)
 

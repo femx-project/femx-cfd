@@ -11,9 +11,7 @@ from femx_cfd.models.navier_stokes import make_reg
 class VarTest(unittest.TestCase):
     @staticmethod
     def make_prob_and_obs():
-        mesh_file = (
-            Path(__file__).resolve().parents[1] / "data" / "2d_tiny_tube.msh"
-        )
+        mesh_file = Path(__file__).resolve().parents[1] / "data" / "2d_tiny_tube.msh"
         model = femx.NavierStokesModel(
             mesh_file,
             num_steps=3,
@@ -44,9 +42,7 @@ class VarTest(unittest.TestCase):
 
     @staticmethod
     def make_prob_and_obs_with_init_mode(periodic=False):
-        mesh_file = (
-            Path(__file__).resolve().parents[1] / "data" / "2d_tiny_tube.msh"
-        )
+        mesh_file = Path(__file__).resolve().parents[1] / "data" / "2d_tiny_tube.msh"
         model = femx.NavierStokesModel(
             mesh_file,
             num_steps=3,
@@ -71,16 +67,12 @@ class VarTest(unittest.TestCase):
         free_velocity = np.setdiff1d(model.velocity_dofs, constrained)
         modes = np.zeros((model.num_states, 1))
         modes[free_velocity[::2], 0] = 0.5
-        prob.add_init_ctr(
-            femx.InitialStateControl(modes, mean=prob.initial_state)
-        )
+        prob.add_init_ctr(femx.InitialStateControl(modes, mean=prob.initial_state))
         prob.build()
 
         np.testing.assert_array_equal(modes[prob.fixed_dofs], 0.0)
         np.testing.assert_array_equal(modes[prob.ctr_state_dofs], 0.0)
-        pressure_dofs = np.setdiff1d(
-            np.arange(model.num_states), model.velocity_dofs
-        )
+        pressure_dofs = np.setdiff1d(np.arange(model.num_states), model.velocity_dofs)
         np.testing.assert_array_equal(modes[pressure_dofs], 0.0)
 
         op = femx.VelocityObservationOperator(
@@ -128,8 +120,7 @@ class VarTest(unittest.TestCase):
             perturb = np.zeros(param.size)
             perturb[i] = step
             finite_diff[i] = (
-                var.reduced.value(param + perturb)
-                - var.reduced.value(param - perturb)
+                var.reduced.value(param + perturb) - var.reduced.value(param - perturb)
             ) / (2.0 * step)
 
         np.testing.assert_allclose(
@@ -163,8 +154,7 @@ class VarTest(unittest.TestCase):
             perturb = np.zeros(param.size)
             perturb[i] = step
             finite_diff[i] = (
-                var.reduced.value(param + perturb)
-                - var.reduced.value(param - perturb)
+                var.reduced.value(param + perturb) - var.reduced.value(param - perturb)
             ) / (2.0 * step)
 
         np.testing.assert_allclose(
@@ -178,9 +168,7 @@ class VarTest(unittest.TestCase):
         prob, obs = self.make_prob_and_obs_with_init_mode()
         param = np.array([0.1, 0.15, 0.5])
         dense_obj, dense_grad = Var(prob, obs).value_grad(param)
-        obj, grad = Var(
-            prob, obs, backend=backend
-        ).value_grad(param)
+        obj, grad = Var(prob, obs, backend=backend).value_grad(param)
 
         np.testing.assert_allclose(obj, dense_obj, rtol=2.0e-7)
         np.testing.assert_allclose(
@@ -219,31 +207,19 @@ class VarTest(unittest.TestCase):
         self.assertAlmostEqual(obj, expected_obj, places=13)
 
         surface = prob.model.mesh.boundary(prob.ctr.boundary)
-        local = {
-            int(node): i for i, node in enumerate(surface.mesh_node_ids)
-        }
+        local = {int(node): i for i, node in enumerate(surface.mesh_node_ids)}
         active = [local[int(node)] for node in prob.ctr_mesh_node_ids]
         stiffness, mass, _ = surface.laplacian_matrices()
         stiffness = stiffness[active][:, active]
         mass = mass[active][:, active]
         centered = (param - bg).reshape(prob.param_shape)
         levels = param.reshape(prob.param_shape)
-        expected_bg = 0.5 * 2.0 * sum(
-            vals @ mass @ vals for vals in centered
-        )
-        expected_space = 0.5 * 4.0 * sum(
-            vals @ stiffness @ vals for vals in levels
-        )
-        expected_time = 0.5 * 3.0 * np.sum(
-            np.diff(centered, axis=0) ** 2
-        )
+        expected_bg = 0.5 * 2.0 * sum(vals @ mass @ vals for vals in centered)
+        expected_space = 0.5 * 4.0 * sum(vals @ stiffness @ vals for vals in levels)
+        expected_time = 0.5 * 3.0 * np.sum(np.diff(centered, axis=0) ** 2)
         self.assertAlmostEqual(reg.bg_obj.value(traj, param), expected_bg)
-        self.assertAlmostEqual(
-            reg.space_obj.value(traj, param), expected_space
-        )
-        self.assertAlmostEqual(
-            reg.time_obj.value(traj, param), expected_time
-        )
+        self.assertAlmostEqual(reg.space_obj.value(traj, param), expected_space)
+        self.assertAlmostEqual(reg.time_obj.value(traj, param), expected_time)
 
         step = 1.0e-6
         finite_diff = np.empty(param.size)
@@ -251,8 +227,7 @@ class VarTest(unittest.TestCase):
             perturb = np.zeros(param.size)
             perturb[i] = step
             finite_diff[i] = (
-                var.reduced.value(param + perturb)
-                - var.reduced.value(param - perturb)
+                var.reduced.value(param + perturb) - var.reduced.value(param - perturb)
             ) / (2.0 * step)
         np.testing.assert_allclose(
             grad,
@@ -374,14 +349,8 @@ class VarTest(unittest.TestCase):
         )
         self.assertLess(res.obs_misfit, 1.0e-13)
         self.assertLess(res.grad_norm, 1.0e-8)
-        self.assertTrue(
-            any(event["type"] == "optimizer" for event in events)
-        )
-        phases = {
-            event["phase"]
-            for event in events
-            if event["type"] == "solve"
-        }
+        self.assertTrue(any(event["type"] == "optimizer" for event in events))
+        phases = {event["phase"] for event in events if event["type"] == "solve"}
         self.assertIn("forward-begin", phases)
         self.assertIn("adjoint-step", phases)
 

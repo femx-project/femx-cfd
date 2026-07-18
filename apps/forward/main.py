@@ -6,10 +6,12 @@ import os
 import sys
 import traceback
 from pathlib import Path
+from typing import Optional, Sequence
 
 from omegaconf import OmegaConf
 
 from apps.common import artifacts, parallel, progress
+from femx_cfd._typing import Config, Dynamic, Progress
 from femx_cfd.forward import load_forward_case, solve_forward
 
 
@@ -18,7 +20,7 @@ RESULT_FORMAT = "femx-cfd-forward-result"
 OUTPUT_VERSION = 1
 
 
-def _parser():
+def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="femx-forward",
         description="Run one femx-cfd forward-simulation case.",
@@ -43,7 +45,7 @@ def _parser():
     return parser
 
 
-def _output_path(case_path, value):
+def _output_path(case_path: Path, value: Optional[str]) -> Path:
     if value is None:
         return case_path.parent / "result"
     output = Path(value).expanduser()
@@ -52,7 +54,7 @@ def _output_path(case_path, value):
     return output.resolve()
 
 
-def _write_json(path, value):
+def _write_json(path: Path, value: Dynamic) -> None:
     with artifacts._atomic_path(path) as temporary:
         temporary.write_text(
             json.dumps(value, indent=2, sort_keys=True) + "\n",
@@ -60,7 +62,7 @@ def _write_json(path, value):
         )
 
 
-def _write_status(output, state, **values):
+def _write_status(output: Path, state: str, **values: Dynamic) -> None:
     _write_json(
         output / "status.json",
         {
@@ -72,7 +74,7 @@ def _write_status(output, state, **values):
     )
 
 
-def _prepare_output(output, case):
+def _prepare_output(output: Path, case: Config) -> None:
     if output.exists() and any(output.iterdir()):
         raise FileExistsError(f"result directory is not empty: {output}")
     output.mkdir(parents=True, exist_ok=True)
@@ -81,7 +83,7 @@ def _prepare_output(output, case):
     _write_status(output, "running")
 
 
-def _write_result(output, solution):
+def _write_result(output: Path, solution: Dynamic) -> None:
     artifacts.write_truth(output / "flow.h5", solution.model, solution.trajectory)
     _write_json(
         output / "result.json",
@@ -96,7 +98,7 @@ def _write_result(output, solution):
     _write_status(output, "complete", result="result.json")
 
 
-def _progress_sink(kind, enabled):
+def _progress_sink(kind: str, enabled: bool) -> Progress:
     if not enabled:
         return progress.NullProgress()
     if kind == "json":
@@ -104,7 +106,7 @@ def _progress_sink(kind, enabled):
     return progress.ConsoleProgress()
 
 
-def run_cli(argv=None):
+def run_cli(argv: Optional[Sequence[str]] = None) -> int:
     args = _parser().parse_args(argv)
     case_path = Path(args.case).expanduser().resolve()
     output = _output_path(case_path, args.output)
@@ -155,7 +157,7 @@ def run_cli(argv=None):
             runtime.finalize()
 
 
-def main():
+def main() -> None:
     raise SystemExit(run_cli())
 
 

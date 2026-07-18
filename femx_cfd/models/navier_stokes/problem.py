@@ -3,8 +3,10 @@
 import femx
 import numpy as np
 
+from femx_cfd._typing import Config, Dynamic
 
-def add_bc(prob, cfg):
+
+def add_bc(prob: Dynamic, cfg: Config) -> None:
     """Add fixed boundary conditions declared in a case configuration."""
     conditions = cfg["bc"]
     if not isinstance(conditions, list):
@@ -31,7 +33,7 @@ def add_bc(prob, cfg):
         prob.add_bc(femx.DirichletBC(boundary, field, space["value"]))
 
 
-def num_steps(cfg):
+def num_steps(cfg: Config) -> int:
     ratio = cfg["simulation"]["end_time"] / cfg["time"]["dt"]
     steps = int(round(ratio))
     if not np.isclose(ratio, steps, rtol=0.0, atol=1.0e-10):
@@ -40,15 +42,15 @@ def num_steps(cfg):
 
 
 def make_problem(
-    cfg,
+    cfg: Config,
     *,
-    times,
-    periodic,
-    normal,
-    init_state=None,
-    init_mean=None,
-    init_modes=None,
-):
+    times: np.ndarray,
+    periodic: bool,
+    normal: np.ndarray,
+    init_state: Dynamic = None,
+    init_mean: Dynamic = None,
+    init_modes: Dynamic = None,
+) -> Dynamic:
     """Build the Navier--Stokes model configured for an analysis case."""
 
     fluid = cfg["fluid"]

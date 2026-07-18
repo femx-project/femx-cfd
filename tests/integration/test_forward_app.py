@@ -65,9 +65,7 @@ class ForwardApplicationTest(unittest.TestCase):
             self.assertEqual(status["state"], "complete")
             self.assertEqual(result["flow"], "flow.xdmf")
 
-            events = [
-                json.loads(line) for line in stdout.getvalue().splitlines()
-            ]
+            events = [json.loads(line) for line in stdout.getvalue().splitlines()]
             self.assertEqual(events[0]["type"], "stage")
             self.assertEqual(events[-1]["type"], "stage")
             self.assertIn("complete", events[-1]["message"])

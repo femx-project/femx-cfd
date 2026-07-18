@@ -3,8 +3,10 @@
 import h5py
 import numpy as np
 
+from femx_cfd._typing import Config, Dynamic, PathLike
 
-def load_mri(path):
+
+def load_mri(path: PathLike) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     with h5py.File(path, "r") as h5:
         if "x" not in h5 or "u" not in h5 or "t" not in h5:
             raise ValueError("MRI HDF5 must contain x, u, and t")
@@ -30,7 +32,11 @@ def load_mri(path):
     return pts, times, np.asarray(vel, dtype=float)
 
 
-def inlet_frame(surface, dim, normal):
+def inlet_frame(
+    surface: Dynamic,
+    dim: int,
+    normal: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     coords = np.asarray(surface.coordinates)[:, :dim]
     center = coords.mean(axis=0)
     centered = coords - center
@@ -42,7 +48,11 @@ def inlet_frame(surface, dim, normal):
     return center, tangents, local
 
 
-def _line_stencils(local_nodes, elements, pts):
+def _line_stencils(
+    local_nodes: np.ndarray,
+    elements: np.ndarray,
+    pts: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
     nodes = np.asarray(local_nodes, dtype=float).reshape(-1)
     pts = np.asarray(pts, dtype=float).reshape(-1)
     stencils = np.zeros((pts.size, nodes.size))
@@ -63,7 +73,11 @@ def _line_stencils(local_nodes, elements, pts):
     return stencils[keep], keep
 
 
-def _triangle_stencils(local_nodes, elements, pts):
+def _triangle_stencils(
+    local_nodes: np.ndarray,
+    elements: np.ndarray,
+    pts: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
     local_nodes = np.asarray(local_nodes, dtype=float)
     elements = np.asarray(elements, dtype=int)
     pts = np.asarray(pts, dtype=float)
@@ -95,13 +109,23 @@ def _triangle_stencils(local_nodes, elements, pts):
     return stencils[keep], keep
 
 
-def _surface_stencils(local_nodes, elements, pts):
+def _surface_stencils(
+    local_nodes: np.ndarray,
+    elements: np.ndarray,
+    pts: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
     if np.asarray(elements).shape[1] == 2:
         return _line_stencils(local_nodes, elements, pts)
     return _triangle_stencils(local_nodes, elements, pts)
 
 
-def project_to_inlet(surface, pts, vel, normal, opts):
+def project_to_inlet(
+    surface: Dynamic,
+    pts: np.ndarray,
+    vel: np.ndarray,
+    normal: np.ndarray,
+    opts: Config,
+) -> tuple[np.ndarray, np.ndarray]:
     """Fit MRI velocities to smooth inlet-normal profiles."""
 
     dim = pts.shape[1]
@@ -110,9 +134,7 @@ def project_to_inlet(surface, pts, vel, normal, opts):
     dist = rel @ normal
     proj = pts - dist[:, None] * normal
     proj_local = (proj - center) @ tangents
-    selected = np.flatnonzero(
-        (dist >= -1.0e-8) & (dist <= opts["depth"])
-    )
+    selected = np.flatnonzero((dist >= -1.0e-8) & (dist <= opts["depth"]))
     stencils, keep = _surface_stencils(
         local,
         surface.elements,
@@ -134,9 +156,7 @@ def project_to_inlet(surface, pts, vel, normal, opts):
     wts = np.exp(-0.5 * np.square(selected_dist / decay))
     weighted_basis = np.sqrt(wts)[:, None] * sample_basis
     ridge = float(opts["ridge"])
-    penalties = np.concatenate(
-        ([0.0], np.sqrt(ridge) * eigvals / eigvals[0])
-    )
+    penalties = np.concatenate(([0.0], np.sqrt(ridge) * eigvals / eigvals[0]))
     lhs = np.vstack((weighted_basis, np.diag(penalties)))
 
     profs = []

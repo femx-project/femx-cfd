@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from types import ModuleType
+
+from femx_cfd._typing import PathLike
 
 
-def _require_gmsh():
+def _require_gmsh() -> ModuleType:
     try:
         import gmsh
     except ModuleNotFoundError as exc:
@@ -16,7 +19,11 @@ def _require_gmsh():
     return gmsh
 
 
-def _boundary_curves(gmsh, length: float, surface: int):
+def _boundary_curves(
+    gmsh: ModuleType,
+    length: float,
+    surface: int,
+) -> tuple[list[int], list[int], list[int]]:
     """Return the rectangle's inlet, outlet, and wall curve tags."""
     half_length = length / 2
     tolerance = max(length, 1.0) * 1e-10
@@ -37,7 +44,13 @@ def _boundary_curves(gmsh, length: float, surface: int):
     return inlet, outlet, wall
 
 
-def write_straight_tube(path, *, length: float, diameter: float, cell_size: float):
+def write_straight_tube(
+    path: PathLike,
+    *,
+    length: float,
+    diameter: float,
+    cell_size: float,
+) -> None:
     """Write a 2D rectangular flow mesh with named physical groups.
 
     The mesh spans ``[-length/2, length/2]`` by

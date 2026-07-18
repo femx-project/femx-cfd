@@ -6,15 +6,17 @@ import femx
 import numpy as np
 from scipy.optimize import minimize
 
+from femx_cfd._typing import Dynamic, OptionalProgress
 
-def _weight(val, name):
+
+def _weight(val: float, name: str) -> float:
     val = float(val)
     if not np.isfinite(val) or val < 0.0:
         raise ValueError(f"{name} must be finite and nonnegative")
     return val
 
 
-def _params(vals, size, name):
+def _params(vals: Dynamic, size: int, name: str) -> np.ndarray:
     arr = np.asarray(vals, dtype=float)
     if arr.size != size:
         raise ValueError(f"{name} must contain {size} values")
@@ -48,13 +50,13 @@ class Var:
 
     def __init__(
         self,
-        prob,
-        obs,
+        prob: Dynamic,
+        obs: Dynamic,
         *,
-        reg=None,
-        init_params=None,
-        backend="dense",
-    ):
+        reg: Dynamic = None,
+        init_params: Dynamic = None,
+        backend: str = "dense",
+    ) -> None:
         if obs.op.model is not prob.model:
             raise ValueError("prob and obs must use the same model")
         if prob.num_param == 0:
@@ -63,10 +65,14 @@ class Var:
         self._prob = prob
         self._obs = obs
         self._reg = reg
-        self._init_params = prob.param if init_params is None else _params(
-            init_params,
-            prob.num_param,
-            "init_params",
+        self._init_params = (
+            prob.param
+            if init_params is None
+            else _params(
+                init_params,
+                prob.num_param,
+                "init_params",
+            )
         )
         self._obs_obj = obs.objective(num_param=prob.num_param)
         if reg is None:
@@ -82,58 +88,60 @@ class Var:
         self._reduced = prob.create_reduced(self._obj, backend)
 
     @property
-    def prob(self):
+    def prob(self) -> Dynamic:
         return self._prob
 
     @property
-    def obs(self):
+    def obs(self) -> Dynamic:
         return self._obs
 
     @property
-    def reg(self):
+    def reg(self) -> Dynamic:
         return self._reg
 
     @property
-    def init_params(self):
+    def init_params(self) -> np.ndarray:
         return self._init_params.copy()
 
     @property
-    def obs_obj(self):
+    def obs_obj(self) -> Dynamic:
         return self._obs_obj
 
     @property
-    def obj(self):
+    def obj(self) -> Dynamic:
         return self._obj
 
     @property
-    def reduced(self):
+    def reduced(self) -> Dynamic:
         return self._reduced
 
     @property
-    def backend(self):
+    def backend(self) -> str:
         return self._reduced.backend
 
-    def value_grad(self, params, prog=None):
+    def value_grad(
+        self,
+        params: np.ndarray,
+        prog: OptionalProgress = None,
+    ) -> tuple[float, np.ndarray]:
         return self._reduced.value_grad(params, progress=prog)
 
     def solve(
         self,
-        init_params=None,
+        init_params: Dynamic = None,
         *,
-        opt="scipy",
-        bnds=None,
-        max_itrs=100,
-        grad_tol=1.0e-8,
-        func_tol=1.0e-12,
-        prog=None,
+        opt: str = "scipy",
+        bnds: Dynamic = None,
+        max_itrs: int = 100,
+        grad_tol: float = 1.0e-8,
+        func_tol: float = 1.0e-12,
+        prog: OptionalProgress = None,
     ) -> VarResult:
         """Solve with SciPy L-BFGS-B or PETSc/TAO LMVM."""
 
         if opt not in ("scipy", "tao"):
             raise ValueError("opt must be 'scipy' or 'tao'")
-        if isinstance(max_itrs, bool) or not isinstance(
-            max_itrs, (int, np.integer)
-        ):
+        if isinstance(max_itrs, bool) or not isinstance(max_itrs, (int, np.integer)):
             raise TypeError("max_itrs must be an integer")
         if max_itrs <= 0:
             raise ValueError("max_itrs must be positive")
@@ -142,16 +150,20 @@ class Var:
         grad_tol = _weight(grad_tol, "grad_tol")
         if opt == "scipy":
             func_tol = _weight(func_tol, "func_tol")
-        init_params = self._init_params if init_params is None else _params(
-            init_params,
-            self._prob.num_param,
-            "init_params",
+        init_params = (
+            self._init_params
+            if init_params is None
+            else _params(
+                init_params,
+                self._prob.num_param,
+                "init_params",
+            )
         )
 
         if opt == "scipy":
             num_eval = 0
 
-            def evaluate(params):
+            def evaluate(params: np.ndarray) -> tuple[float, np.ndarray]:
                 nonlocal num_eval
                 obj, grad = self.value_grad(params, prog=prog)
                 num_eval += 1

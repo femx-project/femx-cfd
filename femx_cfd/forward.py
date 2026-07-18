@@ -5,12 +5,14 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 import tempfile
+from typing import Iterator, Optional
 
 import femx
 import gmsh
 import numpy as np
 from omegaconf import OmegaConf
 
+from femx_cfd._typing import Config, Dynamic, OptionalProgress, PathLike
 from femx_cfd.models.navier_stokes.problem import make_problem
 from femx_cfd.prep.inlet import analytic_inlet, inlet_normal, repeat_inlet
 
@@ -28,17 +30,17 @@ LENGTH_SCALES = {
 class ForwardSolution:
     """A completed forward trajectory and the model that owns its mesh."""
 
-    model: object
-    trajectory: object
+    model: Dynamic
+    trajectory: Dynamic
 
 
-def _mapping(value, name):
+def _mapping(value: Dynamic, name: str) -> Config:
     if not isinstance(value, dict):
         raise ValueError(f"{name} must be a mapping")
     return value
 
 
-def _positive(value, name):
+def _positive(value: Dynamic, name: str) -> float:
     try:
         number = float(value)
     except (TypeError, ValueError) as error:
@@ -48,7 +50,7 @@ def _positive(value, name):
     return number
 
 
-def _multiple(value, unit, name):
+def _multiple(value: float, unit: float, name: str) -> int:
     ratio = value / unit
     count = int(round(ratio))
     if count <= 0 or not np.isclose(ratio, count, rtol=0.0, atol=1.0e-10):
@@ -56,7 +58,7 @@ def _multiple(value, unit, name):
     return count
 
 
-def _validate_inlet(inlet, dt, end_time):
+def _validate_inlet(inlet: Config, dt: float, end_time: float) -> None:
     boundary = inlet.get("boundary")
     if not isinstance(boundary, str) or not boundary:
         raise ValueError("inlet.boundary must be a nonempty string")
@@ -85,9 +87,7 @@ def _validate_inlet(inlet, dt, end_time):
     )
     waveform_kind = waveform.get("kind", "uniform")
     if waveform_kind not in ("uniform", "harmonics"):
-        raise ValueError(
-            "inlet.waveform.kind must be 'uniform' or 'harmonics'"
-        )
+        raise ValueError("inlet.waveform.kind must be 'uniform' or 'harmonics'")
 
     period = _positive(inlet.get("period", end_time), "inlet.period")
     _multiple(period, dt, "inlet.period")
@@ -101,7 +101,10 @@ def _validate_inlet(inlet, dt, end_time):
     inlet["waveform"] = waveform
 
 
-def _validate_boundary_conditions(conditions, inlet_boundary):
+def _validate_boundary_conditions(
+    conditions: Dynamic,
+    inlet_boundary: str,
+) -> None:
     if not isinstance(conditions, list) or not conditions:
         raise ValueError("boundary_conditions must be a nonempty list")
 
@@ -133,9 +136,7 @@ def _validate_boundary_conditions(conditions, inlet_boundary):
                     f"boundary_conditions[{index}].value must be finite"
                 ) from error
             if not np.isfinite(value):
-                raise ValueError(
-                    f"boundary_conditions[{index}].value must be finite"
-                )
+                raise ValueError(f"boundary_conditions[{index}].value must be finite")
             condition["value"] = value
             continue
         raise ValueError(
@@ -143,7 +144,10 @@ def _validate_boundary_conditions(conditions, inlet_boundary):
         )
 
 
-def validate_forward_case(case, base_dir=None):
+def validate_forward_case(
+    case: Dynamic,
+    base_dir: Optional[PathLike] = None,
+) -> Config:
     """Validate and normalize a plain forward-case mapping."""
 
     case = deepcopy(_mapping(case, "case"))
@@ -202,7 +206,7 @@ def validate_forward_case(case, base_dir=None):
     return case
 
 
-def load_forward_case(path):
+def load_forward_case(path: PathLike) -> Config:
     """Load a YAML case, resolving its mesh relative to the YAML file."""
 
     case_path = Path(path).expanduser().resolve()
@@ -212,7 +216,7 @@ def load_forward_case(path):
     return validate_forward_case(loaded, base_dir=case_path.parent)
 
 
-def _fixed_conditions(case, dimension):
+def _fixed_conditions(case: Config, dimension: int) -> list[Config]:
     conditions = []
     for condition in case["boundary_conditions"]:
         if condition["kind"] == "no_slip":
@@ -233,7 +237,7 @@ def _fixed_conditions(case, dimension):
 
 
 @contextmanager
-def _mesh_in_meters(mesh_options):
+def _mesh_in_meters(mesh_options: Config) -> Iterator[Path]:
     path = Path(mesh_options["path"])
     scale = LENGTH_SCALES[mesh_options["length_unit"]]
     if scale == 1.0:
@@ -250,10 +254,22 @@ def _mesh_in_meters(mesh_options):
             gmsh.open(str(path))
             gmsh.model.mesh.affineTransform(
                 [
-                    scale, 0.0, 0.0, 0.0,
-                    0.0, scale, 0.0, 0.0,
-                    0.0, 0.0, scale, 0.0,
-                    0.0, 0.0, 0.0, 1.0,
+                    scale,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    scale,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    scale,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
                 ]
             )
             gmsh.write(str(scaled))
@@ -262,7 +278,7 @@ def _mesh_in_meters(mesh_options):
         yield scaled
 
 
-def _make_forward_problem(case):
+def _make_forward_problem(case: Config) -> tuple[Dynamic, np.ndarray]:
     with _mesh_in_meters(case["mesh"]) as mesh_path:
         mesh = femx.Mesh.read(mesh_path)
         inlet_options = case["inlet"]
@@ -315,7 +331,10 @@ def _make_forward_problem(case):
     return problem, inlet.params_for(problem)
 
 
-def solve_forward(case, progress=None):
+def solve_forward(
+    case: Config,
+    progress: OptionalProgress = None,
+) -> ForwardSolution:
     """Solve one validated case and return its complete trajectory."""
 
     case = validate_forward_case(case)

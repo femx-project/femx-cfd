@@ -1,14 +1,21 @@
 """Create a common inlet boundary condition from a formula or MRI."""
 
+from typing import Optional
+
 import femx
 import numpy as np
 
+from femx_cfd._typing import Config, Dynamic
 from femx_cfd.data import InletData, load_velocity
 
 from .mri import project_to_inlet
 
 
-def inlet_normal(mesh, surface, value="auto"):
+def inlet_normal(
+    mesh: Dynamic,
+    surface: Dynamic,
+    value: Dynamic = "auto",
+) -> np.ndarray:
     """Return a unit inlet normal directed into the volume mesh."""
 
     dim = mesh.dimension
@@ -39,7 +46,11 @@ def inlet_normal(mesh, surface, value="auto"):
     return normal
 
 
-def _periodic(times, vals, period):
+def _periodic(
+    times: np.ndarray,
+    vals: np.ndarray,
+    period: float,
+) -> tuple[np.ndarray, np.ndarray]:
     if not np.isclose(times[0], 0.0):
         raise ValueError("periodic inlet data must start at t=0")
     if times[-1] > period or np.isclose(times[-1], period):
@@ -54,7 +65,7 @@ def _periodic(times, vals, period):
     )
 
 
-def _waveform(times, period, cfg):
+def _waveform(times: np.ndarray, period: float, cfg: Config) -> np.ndarray:
     if cfg.get("kind", "harmonics") == "uniform":
         return np.full(times.size, float(cfg.get("value", 1.0)))
     if cfg.get("kind", "harmonics") != "harmonics":
@@ -78,15 +89,15 @@ def _waveform(times, period, cfg):
 
 
 def analytic_inlet(
-    surface,
-    cfg,
-    normal,
-    boundary,
-    kind="normal",
+    surface: Dynamic,
+    cfg: Config,
+    normal: np.ndarray,
+    boundary: str,
+    kind: str = "normal",
     *,
-    space,
-    time,
-):
+    space: Config,
+    time: Config,
+) -> InletData:
     """Evaluate an analytic inlet specified by spatial and temporal profiles."""
 
     period = float(cfg["T"])
@@ -130,7 +141,11 @@ def analytic_inlet(
     )
 
 
-def repeat_inlet(inlet, cycles, end_time=None):
+def repeat_inlet(
+    inlet: InletData,
+    cycles: int,
+    end_time: Optional[float] = None,
+) -> InletData:
     """Repeat one periodic inlet over multiple cycles."""
 
     period = inlet.times[-1] - inlet.times[0]
@@ -156,7 +171,12 @@ def repeat_inlet(inlet, cycles, end_time=None):
     )
 
 
-def velocity_inlet(surface, cfg, normal, boundary=None):
+def velocity_inlet(
+    surface: Dynamic,
+    cfg: Config,
+    normal: np.ndarray,
+    boundary: Optional[str] = None,
+) -> InletData:
     """Project prepared discrete velocities onto an inlet surface."""
 
     velocity = load_velocity(cfg["file"])
@@ -187,16 +207,14 @@ def velocity_inlet(surface, cfg, normal, boundary=None):
     )
 
 
-def make_inlet(cfg):
+def make_inlet(cfg: Config) -> InletData:
     """Build inlet data using the source selected in a plain config dict."""
 
     mesh = femx.Mesh.read(cfg["mesh"])
     opts = cfg["inlet"]
     control = cfg["control"]
     if control["kind"] not in ("normal", "vector"):
-        raise ValueError(
-            "control.kind must be 'normal' or 'vector'"
-        )
+        raise ValueError("control.kind must be 'normal' or 'vector'")
     boundary = control["boundary"]
     surface = mesh.boundary(boundary)
     normal = inlet_normal(mesh, surface, control.get("normal", "auto"))

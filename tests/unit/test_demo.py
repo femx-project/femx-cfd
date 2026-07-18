@@ -18,8 +18,12 @@ class DemoRunnerTest(unittest.TestCase):
 
         commands = [call.args[0] for call in run.call_args_list]
         self.assertEqual(len(commands), 5)
-        self.assertEqual(commands[0][2:5], ["apps.mesh.main", "--config-name", "demo/mesh"])
-        self.assertEqual(commands[-1][2:5], ["apps.var.main", "--config-name", "demo/var"])
+        self.assertEqual(
+            commands[0][2:5], ["apps.mesh.main", "--config-name", "demo/mesh"]
+        )
+        self.assertEqual(
+            commands[-1][2:5], ["apps.var.main", "--config-name", "demo/var"]
+        )
         text = output.getvalue()
         self.assertIn("femx-var-demo  [1/5]  mesh", text)
         self.assertIn("Completed: mesh", text)
