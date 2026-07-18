@@ -1,9 +1,13 @@
 # femx-cfd agent guidance
 
-## README
+## Documentation
 
-- Keep the root README short and limited to stable, user-facing essentials.
-- Do not include full configuration schemas, long YAML examples, exhaustive
-  option lists, output-file inventories, or implementation details.
-- Do not mention downstream applications or consumers. Document femx-cfd as
-  an independent project.
+- Keep the README and documentation concise, stable, and user-facing. Describe
+  femx-cfd as an independent project without mentioning downstream consumers.
+- Lead with the command or decision a user needs, followed only by the rules
+  required to use it correctly.
+- Prefer a compact table and one representative snippet. Point to canonical
+  files under `examples/` for complete cases.
+- Avoid repeated explanations, full schemas, exhaustive option or output-file
+  inventories, and implementation details unless they define the public
+  interface.
