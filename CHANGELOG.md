@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.1
+
+### Changed
+
+- Updated the supported femx dependency range to `femx>=0.3.0,<0.4.0`.
+- Updated solver timing expectations for femx v0.3.0, whose timing counters
+  report the most recent solve.
+
 ## v0.3.0
 
 ### Added
