@@ -12,6 +12,8 @@ class ConsoleProgress:
         self.stream = stream or sys.stderr
         self.tty = self.stream.isatty()
         self.active = False
+        self.member_states: dict[tuple[str, str], ProgressEvent] = {}
+        self.member_lines = 0
 
     def __enter__(self) -> "ConsoleProgress":
         return self
@@ -21,6 +23,7 @@ class ConsoleProgress:
 
     def stage(self, message: str) -> None:
         self._clear()
+        self.member_states.clear()
         self.stream.write(message + "\n")
         self.stream.flush()
 
@@ -34,15 +37,20 @@ class ConsoleProgress:
             self._optimizer(event)
         elif kind == "ensemble" and event["status"] == "begin":
             self._ensemble(event)
+        elif kind == "ensemble_solve":
+            self._ensemble_solve(event)
 
     def close(self) -> None:
         self._clear()
 
     def _solve(self, event: ProgressEvent) -> None:
-        if not self.tty:
-            return
         phase = event["phase"].split("-", 1)[0]
-        self.stream.write(f"\r\033[K{phase:>7}  {event['step']:>4}/{event['total']:<4}")
+        # MPI launchers can retain a partial output line.  Terminate the line
+        # so it is forwarded immediately, then return to it for the next
+        # update.  A terminal still shows only the current solver step.
+        self.stream.write(
+            f"\r\033[K{phase:>7}  {event['step']:>4}/{event['total']:<4}\n\033[1A"
+        )
         self.stream.flush()
         self.active = True
 
@@ -63,7 +71,38 @@ class ConsoleProgress:
         label = "mean" if event["phase"] == "mean" else "member"
         self.stage(f"EnVar {label}: {event['step']}/{event['total']} forward")
 
+    def _ensemble_solve(self, event: ProgressEvent) -> None:
+        stage = event["stage"]
+        member = event["member"]
+        if not self.tty:
+            self.stream.write(
+                f"{stage:>11}  {member:<28} {event['phase']:>7}  "
+                f"{event['step']:>4}/{event['total']:<4}\n"
+            )
+            self.stream.flush()
+            return
+        self.member_states[(stage, member)] = event
+        self._render_member_states()
+
+    def _render_member_states(self) -> None:
+        if self.member_lines:
+            self.stream.write(f"\033[{self.member_lines}A")
+        for event in self.member_states.values():
+            self.stream.write(
+                f"\r\033[K{event['stage']:>11}  {event['member']:<28} "
+                f"{event['phase']:>7}  {event['step']:>4}/{event['total']:<4}\n"
+            )
+        self.stream.flush()
+        self.member_lines = len(self.member_states)
+
     def _clear(self) -> None:
+        if self.member_lines:
+            self.stream.write(f"\033[{self.member_lines}A")
+            for _ in range(self.member_lines):
+                self.stream.write("\r\033[K\n")
+            self.stream.write(f"\033[{self.member_lines}A")
+            self.stream.flush()
+            self.member_lines = 0
         if not self.active:
             return
         self.stream.write("\r\033[K")

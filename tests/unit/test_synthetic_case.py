@@ -27,6 +27,7 @@ class SyntheticConfigTest(unittest.TestCase):
         self.assertEqual(config["mesh"]["length"], 4.0)
         self.assertEqual(config["truth"]["direction"], "auto")
         self.assertEqual(config["truth"]["profile"]["skew"], 0.0)
+        self.assertEqual(config["observations"]["selected_phases"], [1, 2, 3, 4])
         self.assertEqual(config["observations"]["noise"]["seed"], 42)
         self.assertEqual(config["reconstruction"]["temporal_weight"], 0.0)
 
@@ -61,6 +62,25 @@ class SyntheticConfigTest(unittest.TestCase):
         document["truth"]["normal"] = "auto"
 
         with self.assertRaisesRegex(ValueError, "truth.direction"):
+            validate_synthetic_config(document)
+
+    def test_accepts_selected_observation_phases(self):
+        document = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+        document["observations"]["selected_phases"] = [2, 4]
+
+        config = validate_synthetic_config(document)
+
+        self.assertEqual(config["observations"]["selected_phases"], [2, 4])
+
+    def test_rejects_invalid_selected_observation_phases(self):
+        document = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+        document["observations"]["selected_phases"] = [2, 2]
+
+        with self.assertRaisesRegex(ValueError, "unique and increasing"):
+            validate_synthetic_config(document)
+
+        document["observations"]["selected_phases"] = [5]
+        with self.assertRaisesRegex(ValueError, "must not exceed"):
             validate_synthetic_config(document)
 
 

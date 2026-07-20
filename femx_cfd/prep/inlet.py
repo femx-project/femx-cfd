@@ -51,6 +51,8 @@ def _periodic(
     vals: np.ndarray,
     period: float,
 ) -> tuple[np.ndarray, np.ndarray]:
+    if times.size == 1:
+        return np.asarray((0.0, period)), np.concatenate((vals, vals), axis=0)
     if not np.isclose(times[0], 0.0):
         raise ValueError("periodic inlet data must start at t=0")
     if times[-1] > period or np.isclose(times[-1], period):

@@ -8,18 +8,21 @@ femx-cfd validate case.yaml
 femx-cfd run case.yaml --output result
 ```
 
-Paths are relative to the case file.
+Paths inside a case are relative to the case file. An explicit `--output` path
+is relative to the directory from which `femx-cfd` is run.
 
 ## Formats
 
 | Workflow | `format` | `version` | `method` |
 | --- | --- | ---: | --- |
 | Forward | `femx-cfd-forward` | 2 | — |
-| Var | `femx-cfd-inverse` | 1 | `var` |
-| EnVar | `femx-cfd-inverse` | 1 | `envar` |
+| Var | `femx-cfd-inverse` | 2 | `var` |
+| EnVar | `femx-cfd-inverse` | 2 | `envar` |
 
 Format versions are independent from the femx-cfd package version. Forward
-version 1 remains loadable and is migrated to version 2 automatically.
+version 1 remains loadable and is migrated to version 2 automatically. Inverse
+version 1 also remains loadable; its normal-control default is preserved during
+migration to version 2.
 
 ## Fixed boundaries
 
@@ -71,6 +74,65 @@ Inverse cases reference prepared velocity observations and initialize their
 inlet from an HDF5 file or from those observations. Complete Var and EnVar cases
 are available under `examples/inverse/`.
 
+Inverse version 2 estimates every inlet velocity component by default:
+
+```yaml
+control:
+  boundary: inlet
+  kind: vector
+```
+
+The `kind` field may be omitted because `vector` is the default. To estimate
+only one scalar normal component instead, configure the optional normal mode:
+
+```yaml
+control:
+  boundary: inlet
+  kind: normal
+  normal: auto
+```
+
+An explicit `control.normal` is valid only for normal control. Vector Var uses
+one parameter per inlet node, time level, and mesh velocity component. Its
+control bounds may be negative so tangential directions can have either sign.
+For vector EnVar, every configured inlet mode is expanded once per velocity
+component.
+
+Iterated EnVar re-centers the ensemble on the latest analysis and rebuilds the
+spin-up and observation bases with the same configured modes. One outer
+iteration preserves the single-linearization behavior:
+
+```yaml
+algorithm:
+  prior_weight: 0.25
+  outer_iterations: 2
+```
+
+`outer_iterations` defaults to `1`. The prior penalizes the local coefficient
+increment in each outer iteration. Result HDF5 files retain the final
+`param`/`coeff` and add `param_history`/`coeff_history` across outer iterations.
+
+EnVar modes combine a spatial pattern with a periodic temporal pattern. Define
+the reusable patterns under `ensemble.modes`, then select only the combinations
+that should be active:
+
+```yaml
+ensemble:
+  modes:
+    spatial:
+      uniform: {kind: uniform}
+      skew: {kind: surface_laplacian, index: 1}
+    temporal:
+      mean: {kind: constant}
+      sin1: {kind: sine, order: 1}
+    combined:
+    - {name: flow_mean, spatial: uniform, temporal: mean, scale: 0.15}
+    - {name: skew_sin1, spatial: skew, temporal: sin1, scale: 0.08}
+```
+
+`mode_scales` remains accepted for existing cases, but new cases should use
+`modes`.
+
 Observation-derived initialization reconstructs every velocity component on
 the inlet. `projection.ridge` controls spatial smoothing, while
 `projection.temporal_weight` controls time-derivative smoothing and defaults to
@@ -94,13 +156,36 @@ python tools/build_synthetic_example.py \
 
 For a separate study, provide another config and output directory instead of
 modifying the packaged example.
-The synthetic recipe generates only the mesh, observations, and reconstructed
-inlet; `var/case.yaml` and `envar/case.yaml` remain independent runnable cases.
-Within `truth`, `direction: auto` uses the inlet plane's inward normal. An
+The synthetic recipe generates the mesh, complete truth trajectory,
+observations, and reconstructed inlet; `var/case.yaml` and `envar/case.yaml`
+remain independent runnable cases.
+It writes the complete spin-up and observation trajectory as
+`reference/flow_full.h5` and `reference/flow_full.xdmf`, the final
+data-assimilation window as `reference/flow_window.h5` and
+`reference/flow_window.xdmf`, and exact fields at the selected observation
+times as `reference/flow_observation.h5` and
+`reference/flow_observation.xdmf`. It writes observation velocity data as
+`observation/velocity.h5`, with `observation/velocity.pvd` and one VTU point
+cloud per selected phase. The initial reconstructed inlet is
+`inlet/initial_velocity.h5`. These visualization files make both the reference
+field and sampled data directly inspectable in ParaView. Reference and
+observation times use the inverse-analysis phase coordinate from zero through
+one period; the complete reference trajectory retains physical time.
+Within the reference flow, `direction: auto` uses the inlet plane's inward normal. An
 explicit two- or three-component `direction` is normalized internally and can
 add a tangential component independently from the spatial `profile`.
+`observations.phases` defines the uniformly spaced phase grid. The optional
+one-based `observations.selected_phases` list selects which phases are written
+to the observation file. A single selected phase is extended as a constant
+periodic vector field when constructing the initial inlet estimate.
 
 ## Results
 
-Each run writes its case snapshot, status, result manifest, and flow artifacts
-to a new result directory. A nonempty result directory is never overwritten.
+Each run writes its case snapshot, status, and result manifest at the run root.
+Inverse outputs use `estimate/result.h5` as their only HDF5 container;
+`estimate/flow_window.xdmf` indexes the complete data-assimilation window and
+`estimate/flow_observation.xdmf` selects its fields at observation phases.
+`estimate/observation/velocity.pvd` visualizes predicted velocity at the same
+points and phases as the observation input. The reconstructed inlet used to
+start the analysis is `inlet/initial_velocity.h5`. A nonempty result directory
+is never overwritten.

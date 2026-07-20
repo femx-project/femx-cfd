@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from femx_cfd.runtime.progress import ConsoleProgress, JsonProgress
 from synthetic.case import build_from_file
 
 
@@ -22,12 +23,16 @@ def main() -> None:
         default=root / "examples" / "inverse" / "straight_tube",
     )
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--progress", choices=("console", "json"), default="console")
     args = parser.parse_args()
-    build_from_file(
-        args.config,
-        args.output,
-        force=args.force,
-    )
+    progress = ConsoleProgress() if args.progress == "console" else JsonProgress()
+    with progress:
+        build_from_file(
+            args.config,
+            args.output,
+            force=args.force,
+            progress=progress,
+        )
 
 
 if __name__ == "__main__":

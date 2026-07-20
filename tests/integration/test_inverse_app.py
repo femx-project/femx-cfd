@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+import xml.etree.ElementTree as ET
 
 import h5py
 import pytest
@@ -28,18 +29,42 @@ def test_runs_portable_inverse_case(method: str, tmp_path: Path) -> None:
     assert status["state"] == "complete"
     assert manifest["format"] == "femx-cfd-inverse-result"
     assert manifest["method"] == method
-    assert (output / manifest["flow"]).is_file()
+    assert (output / manifest["flow_window"]).is_file()
+    assert (output / manifest["flow_observation"]).is_file()
+    assert (output / manifest["observation"]).is_file()
     assert (output / manifest["initial_inlet"]).is_file()
     with h5py.File(output / manifest["data"]) as result:
         assert result.attrs["kind"] == f"{method}_result"
         assert "metrics" in result
         assert "Data" in result
+        if method == "envar":
+            assert result["param"].shape == (28,)
+            assert result["coeff"].shape == (4,)
+            assert result["param_history"].shape == (2, 28)
+            assert result["coeff_history"].shape == (2, 4)
+            assert result["metrics"].attrs["outer_iterations"] == 2
+            assert result["metrics"].attrs[
+                "nonlinear_observation_misfit_history"
+            ].shape == (2,)
+        else:
+            assert result["param"].shape == (24,)
+        assert "SampleData" not in result
+    phase_times = [
+        float(element.attrib["Value"])
+        for element in ET.parse(output / manifest["flow_observation"]).findall(
+            "./Domain/Grid/Grid/Time"
+        )
+    ]
+    with h5py.File(EXAMPLE / "observation" / "velocity.h5") as observation:
+        assert phase_times == pytest.approx(observation["velocity/times"][...])
+    pvd = (output / manifest["observation"]).read_text(encoding="utf-8")
+    assert 'file="velocity/velocity_00000.vtu"' in pvd
 
 
 def test_derives_initial_inlet_from_observations(tmp_path: Path) -> None:
     document = yaml.safe_load((EXAMPLE / "var" / "case.yaml").read_text())
     document["mesh"]["path"] = str(EXAMPLE / "mesh.msh")
-    document["observations"]["path"] = str(EXAMPLE / "observations.h5")
+    document["observations"]["path"] = str(EXAMPLE / "observation" / "velocity.h5")
     document["initialization"]["inlet"] = {
         "source": "observations",
         "projection": {
@@ -54,11 +79,33 @@ def test_derives_initial_inlet_from_observations(tmp_path: Path) -> None:
 
     output = run_case(case_path, tmp_path / "result", progress_kind="console")
 
-    inlet = load_inlet(output / "initial_inlet.h5")
+    inlet = load_inlet(output / "inlet" / "initial_velocity.h5")
     assert inlet.source == "velocity"
     assert inlet.boundary == "inlet"
     assert inlet.vals.ndim == 3
-    with h5py.File(output / "initial_inlet.h5") as h5:
+    with h5py.File(output / "inlet" / "initial_velocity.h5") as h5:
         assert h5.attrs["format_version"] == 2
         assert "velocity" in h5["inlet"]
         assert "normal" not in h5["inlet"]
+
+
+def test_runs_optional_normal_control(tmp_path: Path) -> None:
+    document = yaml.safe_load((EXAMPLE / "var" / "case.yaml").read_text())
+    document["mesh"]["path"] = str(EXAMPLE / "mesh.msh")
+    document["observations"]["path"] = str(EXAMPLE / "observation" / "velocity.h5")
+    document["initialization"]["inlet"]["path"] = str(
+        EXAMPLE / "inlet" / "initial_velocity.h5"
+    )
+    document["control"] = {
+        "boundary": "inlet",
+        "kind": "normal",
+        "normal": "auto",
+    }
+    document["algorithm"]["control_bounds"] = [0.0, 0.2]
+    case_path = tmp_path / "normal.yaml"
+    case_path.write_text(yaml.safe_dump(document), encoding="utf-8")
+
+    output = run_case(case_path, tmp_path / "normal", progress_kind="console")
+
+    with h5py.File(output / "estimate" / "result.h5") as result:
+        assert result["param"].shape == (12,)

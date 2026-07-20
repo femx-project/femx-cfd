@@ -76,17 +76,48 @@ class InletData:
     def params_for(self, prob: Dynamic) -> np.ndarray:
         """Order the inlet values for a compatible Navier-Stokes problem."""
 
+        cols = self._param_columns(prob)
+        vals = self.vals[:-1] if self.periodic else self.vals
+        return np.ascontiguousarray(vals[:, cols]).reshape(-1)
+
+    def with_params_for(self, prob: Dynamic, params: Dynamic) -> "InletData":
+        """Return inlet data updated from problem-ordered control parameters."""
+
+        cols = self._param_columns(prob)
+        levels = self.times.size - 1 if self.periodic else self.times.size
+        params = np.asarray(params, dtype=float)
+        expected = levels * len(cols)
+        if params.ndim != 1 or params.size != expected:
+            raise ValueError("normal inlet parameters have an incompatible size")
+        vals = np.empty((levels, self.node_ids.size))
+        vals[:, cols] = params.reshape(levels, len(cols))
+        if self.periodic:
+            vals = np.vstack((vals, vals[:1]))
+        return InletData(
+            boundary=self.boundary,
+            times=self.times,
+            node_ids=self.node_ids,
+            coords=self.coords,
+            normal=self.normal,
+            vals=vals,
+            periodic=self.periodic,
+            source=self.source,
+        )
+
+    def _param_columns(self, prob: Dynamic) -> np.ndarray:
         if not np.allclose(prob.ctr.times, self.times):
             raise ValueError("problem and inlet times do not match")
         local = {int(node): idx for idx, node in enumerate(self.node_ids)}
         try:
-            cols = [local[int(node)] for node in prob.ctr_mesh_node_ids]
+            cols = np.asarray(
+                [local[int(node)] for node in prob.ctr_mesh_node_ids],
+                dtype=np.int64,
+            )
         except KeyError as error:
             raise ValueError("problem and inlet nodes do not match") from error
-        vals = self.vals[:-1] if self.periodic else self.vals
         if len(cols) != self.node_ids.size:
             raise ValueError("problem and inlet nodes do not match")
-        return np.ascontiguousarray(vals[:, cols]).reshape(-1)
+        return cols
 
 
 @dataclass(frozen=True)
@@ -133,6 +164,98 @@ class InletVelocityData:
         object.__setattr__(self, "node_ids", np.ascontiguousarray(node_ids))
         object.__setattr__(self, "coords", np.ascontiguousarray(coords))
         object.__setattr__(self, "vals", np.ascontiguousarray(vals))
+
+    @property
+    def params(self) -> np.ndarray:
+        """Flattened independent time levels for a vector control."""
+
+        vals = self.vals[:-1] if self.periodic else self.vals
+        return vals.reshape(-1).copy()
+
+    def params_for(self, prob: Dynamic) -> np.ndarray:
+        """Order vector inlet values for a compatible velocity control."""
+
+        columns, components = self._param_entries(prob)
+        vals = self.vals[:-1] if self.periodic else self.vals
+        ordered = vals[:, columns, components]
+        params = np.ascontiguousarray(ordered).reshape(-1)
+        if params.size != prob.num_ctr_param:
+            raise ValueError("problem and inlet vector parameter counts do not match")
+        return params
+
+    def with_params_for(
+        self,
+        prob: Dynamic,
+        params: Dynamic,
+    ) -> "InletVelocityData":
+        """Return inlet data updated from problem-ordered control parameters."""
+
+        columns, components = self._param_entries(prob)
+        levels = self.times.size - 1 if self.periodic else self.times.size
+        params = np.asarray(params, dtype=float)
+        expected = levels * columns.size
+        if params.ndim != 1 or params.size != expected:
+            raise ValueError("vector inlet parameters have an incompatible size")
+        vals = np.empty((levels, self.node_ids.size, self.vals.shape[2]))
+        vals[:, columns, components] = params.reshape(levels, columns.size)
+        if self.periodic:
+            vals = np.concatenate((vals, vals[:1]), axis=0)
+        return InletVelocityData(
+            boundary=self.boundary,
+            times=self.times,
+            node_ids=self.node_ids,
+            coords=self.coords,
+            vals=vals,
+            periodic=self.periodic,
+            source=self.source,
+        )
+
+    def _param_entries(self, prob: Dynamic) -> tuple[np.ndarray, np.ndarray]:
+        if getattr(prob.ctr, "kind", None) != "vector":
+            raise ValueError("problem must use a vector velocity control")
+        if not np.allclose(prob.ctr.times, self.times):
+            raise ValueError("problem and inlet times do not match")
+
+        dimension = int(prob.model.mesh.dimension)
+        if self.vals.shape[2] != dimension:
+            raise ValueError("problem and inlet velocity dimensions do not match")
+        node_ids = np.asarray(prob.ctr_mesh_node_ids, dtype=np.int64)
+        state_dofs = np.asarray(prob.ctr_state_dofs, dtype=np.int64)
+        if node_ids.shape != state_dofs.shape:
+            raise ValueError("problem vector control has incompatible node mapping")
+
+        local = {int(node): idx for idx, node in enumerate(self.node_ids)}
+        try:
+            columns = np.asarray(
+                [local[int(node)] for node in node_ids],
+                dtype=np.int64,
+            )
+        except KeyError as error:
+            raise ValueError("problem and inlet nodes do not match") from error
+
+        velocity_dofs = np.asarray(prob.model.velocity_dofs, dtype=np.int64)
+        component_by_dof = {
+            int(dof): index % dimension for index, dof in enumerate(velocity_dofs)
+        }
+        try:
+            components = np.asarray(
+                [component_by_dof[int(dof)] for dof in state_dofs],
+                dtype=np.int64,
+            )
+        except KeyError as error:
+            raise ValueError(
+                "vector control contains a non-velocity state dof"
+            ) from error
+
+        pairs = set(zip(columns.tolist(), components.tolist()))
+        expected_pairs = {
+            (node, component)
+            for node in range(self.node_ids.size)
+            for component in range(dimension)
+        }
+        if pairs != expected_pairs or len(pairs) != node_ids.size:
+            raise ValueError("problem and inlet vector control nodes do not match")
+        return columns, components
 
 
 @dataclass(frozen=True)

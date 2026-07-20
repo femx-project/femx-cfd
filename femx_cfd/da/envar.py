@@ -364,7 +364,14 @@ class EnVar:
             prior_weight=self._prior_weight,
         ).solve(self._obs.values, self._obs.std, bounds=bounds)
 
-        traj = self._solver.solve(lin.param)
+        if prog is not None:
+            prog(
+                {
+                    "type": "stage",
+                    "message": "EnVar: forward solve at analysis",
+                }
+            )
+        traj = self._solver.solve(lin.param, progress=prog)
         pred = self._obs.op.predict(traj)
         return EnVarResult(
             coeff=lin.coeff,

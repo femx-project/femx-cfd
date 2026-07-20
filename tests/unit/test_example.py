@@ -33,11 +33,13 @@ class ExampleRunnerTest(unittest.TestCase):
         self.assertEqual(forward.format, "femx-cfd-forward")
         self.assertEqual(documents["forward"]["version"], 2)
         self.assertEqual(forward.resolved["solver"]["backend"], "petsc")
-        self.assertEqual(documents["var"]["version"], 1)
+        self.assertEqual(documents["var"]["version"], 2)
         self.assertEqual(var.resolved["method"], "var")
+        self.assertEqual(var.resolved["control"]["kind"], "vector")
         self.assertEqual(var.resolved["solver"]["backend"], "petsc")
-        self.assertEqual(documents["envar"]["version"], 1)
+        self.assertEqual(documents["envar"]["version"], 2)
         self.assertEqual(envar.resolved["method"], "envar")
+        self.assertEqual(envar.resolved["control"]["kind"], "vector")
         self.assertEqual(envar.resolved["solver"]["backend"], "petsc")
 
     def test_example_dispatches_through_the_generic_runner(self):

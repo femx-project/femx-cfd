@@ -122,6 +122,72 @@ class InletDataTest(unittest.TestCase):
             [2.0, 1.0, 4.0, 3.0],
         )
 
+        updated = inlet.with_params_for(prob, [20.0, 10.0, 40.0, 30.0])
+
+        np.testing.assert_array_equal(
+            updated.vals,
+            [[10.0, 20.0], [30.0, 40.0], [10.0, 20.0]],
+        )
+        np.testing.assert_array_equal(
+            updated.params_for(prob),
+            [20.0, 10.0, 40.0, 30.0],
+        )
+
+    def test_orders_all_velocity_components_for_vector_control(self):
+        inlet = InletVelocityData(
+            boundary="inlet",
+            times=np.array([0.0, 0.5, 1.0]),
+            node_ids=np.array([4, 7]),
+            coords=np.zeros((2, 3)),
+            vals=np.array(
+                [
+                    [[1.0, 10.0], [2.0, 20.0]],
+                    [[3.0, 30.0], [4.0, 40.0]],
+                    [[1.0, 10.0], [2.0, 20.0]],
+                ]
+            ),
+        )
+        ctr = type(
+            "Control",
+            (),
+            {"kind": "vector", "times": (0.0, 0.5, 1.0)},
+        )()
+        mesh = type("Mesh", (), {"dimension": 2})()
+        model = type(
+            "Model",
+            (),
+            {"mesh": mesh, "velocity_dofs": np.arange(20)},
+        )()
+        prob = type(
+            "Problem",
+            (),
+            {
+                "ctr": ctr,
+                "model": model,
+                "ctr_mesh_node_ids": np.array([7, 7, 4, 4]),
+                "ctr_state_dofs": np.array([14, 15, 8, 9]),
+                "num_ctr_param": 8,
+            },
+        )()
+
+        np.testing.assert_array_equal(
+            inlet.params_for(prob),
+            [2.0, 20.0, 1.0, 10.0, 4.0, 40.0, 3.0, 30.0],
+        )
+
+        updated_params = np.array([20.0, 200.0, 10.0, 100.0, 40.0, 400.0, 30.0, 300.0])
+        updated = inlet.with_params_for(prob, updated_params)
+
+        np.testing.assert_array_equal(
+            updated.vals,
+            [
+                [[10.0, 100.0], [20.0, 200.0]],
+                [[30.0, 300.0], [40.0, 400.0]],
+                [[10.0, 100.0], [20.0, 200.0]],
+            ],
+        )
+        np.testing.assert_array_equal(updated.params_for(prob), updated_params)
+
 
 class VelocityDataTest(unittest.TestCase):
     def make_velocity(self):

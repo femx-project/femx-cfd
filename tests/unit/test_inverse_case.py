@@ -17,8 +17,9 @@ class InverseCaseTest(unittest.TestCase):
         case = load_case(EXAMPLE / "var" / "case.yaml")
 
         self.assertEqual(case.format, INVERSE_FORMAT)
-        self.assertEqual(case.version, 1)
+        self.assertEqual(case.version, 2)
         self.assertEqual(case.resolved["method"], "var")
+        self.assertEqual(case.resolved["control"]["kind"], "vector")
         self.assertTrue(Path(case.resolved["mesh"]["path"]).is_absolute())
         self.assertTrue(Path(case.resolved["observations"]["path"]).is_file())
         self.assertEqual(case.resolved["algorithm"]["optimizer"], "scipy")
@@ -35,8 +36,52 @@ class InverseCaseTest(unittest.TestCase):
         case = load_case(EXAMPLE / "envar" / "case.yaml")
 
         self.assertEqual(case.resolved["method"], "envar")
+        self.assertEqual(case.resolved["algorithm"]["outer_iterations"], 2)
         self.assertEqual(case.resolved["ensemble"]["workers"], 1)
-        self.assertIn("flow_mean", case.resolved["ensemble"]["mode_scales"])
+        modes = case.resolved["ensemble"]["modes"]
+        self.assertEqual(modes["spatial"]["uniform"]["kind"], "uniform")
+        self.assertEqual(modes["combined"][0]["name"], "flow_mean")
+
+    def test_defaults_envar_to_one_outer_iteration(self):
+        document = yaml.safe_load((EXAMPLE / "envar" / "case.yaml").read_text())
+        document["algorithm"].pop("outer_iterations")
+
+        case = validate_inverse_case(document, base_dir=EXAMPLE / "envar")
+
+        self.assertEqual(case["algorithm"]["outer_iterations"], 1)
+
+    def test_rejects_nonpositive_envar_outer_iterations(self):
+        document = yaml.safe_load((EXAMPLE / "envar" / "case.yaml").read_text())
+        document["algorithm"]["outer_iterations"] = 0
+
+        with self.assertRaisesRegex(ValueError, "outer_iterations"):
+            validate_inverse_case(document, base_dir=EXAMPLE / "envar")
+
+    def test_migrates_legacy_ensemble_mode_scales(self):
+        document = yaml.safe_load((EXAMPLE / "envar" / "case.yaml").read_text())
+        document["ensemble"].pop("modes")
+        document["ensemble"]["mode_scales"] = {"flow_mean": 0.2}
+
+        case = validate_inverse_case(document, base_dir=EXAMPLE / "envar")
+
+        self.assertEqual(
+            case["ensemble"]["modes"]["combined"],
+            [
+                {
+                    "name": "flow_mean",
+                    "spatial": "uniform",
+                    "temporal": "mean",
+                    "scale": 0.2,
+                }
+            ],
+        )
+
+    def test_rejects_mode_with_unknown_spatial_definition(self):
+        document = yaml.safe_load((EXAMPLE / "envar" / "case.yaml").read_text())
+        document["ensemble"]["modes"]["combined"][0]["spatial"] = "missing"
+
+        with self.assertRaisesRegex(ValueError, "spatial mode"):
+            validate_inverse_case(document, base_dir=EXAMPLE / "envar")
 
     def test_rejects_unknown_inverse_method(self):
         document = yaml.safe_load((EXAMPLE / "var" / "case.yaml").read_text())
@@ -74,6 +119,54 @@ class InverseCaseTest(unittest.TestCase):
             case["initialization"]["inlet"]["projection"]["temporal_weight"],
             0.0,
         )
+        self.assertEqual(case["control"]["kind"], "vector")
+
+    def test_defaults_version_2_control_to_vector(self):
+        document = yaml.safe_load((EXAMPLE / "var" / "case.yaml").read_text())
+        document["control"].pop("kind")
+
+        case = validate_inverse_case(document, base_dir=EXAMPLE / "var")
+
+        self.assertEqual(case["control"], {"boundary": "inlet", "kind": "vector"})
+
+    def test_accepts_optional_normal_control(self):
+        document = yaml.safe_load((EXAMPLE / "var" / "case.yaml").read_text())
+        document["control"] = {
+            "boundary": "inlet",
+            "kind": "normal",
+            "normal": "auto",
+        }
+        document["algorithm"]["control_bounds"] = [0.0, 0.2]
+
+        case = validate_inverse_case(document, base_dir=EXAMPLE / "var")
+
+        self.assertEqual(case["control"]["kind"], "normal")
+        self.assertEqual(case["control"]["normal"], "auto")
+
+    def test_rejects_normal_field_for_vector_control(self):
+        document = yaml.safe_load((EXAMPLE / "var" / "case.yaml").read_text())
+        document["control"]["normal"] = "auto"
+
+        with self.assertRaisesRegex(ValueError, "only valid for normal"):
+            validate_inverse_case(document, base_dir=EXAMPLE / "var")
+
+    def test_normal_control_keeps_nonnegative_lower_bound(self):
+        document = yaml.safe_load((EXAMPLE / "var" / "case.yaml").read_text())
+        document["control"] = {"boundary": "inlet", "kind": "normal"}
+
+        with self.assertRaisesRegex(ValueError, "nonnegative"):
+            validate_inverse_case(document, base_dir=EXAMPLE / "var")
+
+    def test_migrates_version_1_default_to_normal_control(self):
+        document = yaml.safe_load((EXAMPLE / "var" / "case.yaml").read_text())
+        document["version"] = 1
+        document["control"] = {"boundary": "inlet", "normal": "auto"}
+        document["algorithm"]["control_bounds"] = [0.0, 0.2]
+
+        case = validate_inverse_case(document, base_dir=EXAMPLE / "var")
+
+        self.assertEqual(case["version"], 2)
+        self.assertEqual(case["control"]["kind"], "normal")
         self.assertEqual(case["control"]["normal"], "auto")
 
     def test_snapshot_keeps_referenced_paths_valid(self):

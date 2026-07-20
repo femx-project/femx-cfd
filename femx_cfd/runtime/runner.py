@@ -20,15 +20,12 @@ from . import output, parallel, progress
 
 
 def result_path(case_path: PathLike, value: Optional[PathLike] = None) -> Path:
-    """Resolve a result directory relative to its source case."""
+    """Resolve the default beside its case and explicit paths from the CWD."""
 
     case_path = Path(case_path).expanduser().resolve()
     if value is None:
         return case_path.parent / "result"
-    destination = Path(value).expanduser()
-    if not destination.is_absolute():
-        destination = case_path.parent / destination
-    return destination.resolve()
+    return Path(value).expanduser().resolve()
 
 
 def _progress_sink(kind: str, enabled: bool) -> Progress:
@@ -65,7 +62,11 @@ def _run_inverse(
     runtime.barrier()
     if runtime.is_root:
         prog.stage("output: writing inverse result and flow trajectory")
-        save_inlet(destination / "initial_inlet.h5", solution.initial_velocity)
+        (destination / "inlet").mkdir(parents=True, exist_ok=True)
+        save_inlet(
+            destination / "inlet" / "initial_velocity.h5",
+            solution.initial_velocity,
+        )
         output.write_inverse_result(destination, solution)
 
 

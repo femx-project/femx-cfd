@@ -5,7 +5,7 @@ from dataclasses import replace
 import femx
 import numpy as np
 
-from femx_cfd._typing import Config, Dynamic
+from femx_cfd._typing import Config, Dynamic, OptionalProgress
 from femx_cfd.data import InletData, VelocityData
 from femx_cfd.models.navier_stokes.problem import make_problem
 from femx_cfd.prep.inlet import repeat_inlet
@@ -43,14 +43,25 @@ def observation_times(case: Config, cycle: int = 1) -> np.ndarray:
     period = case["time"]["T"]
     count = case["observation"]["phases"]
     local = np.linspace(0.0, period, count, endpoint=False)
-    return local + (cycle - 1) * period
+    selected = case["observation"].get(
+        "selected_phases",
+        range(1, count + 1),
+    )
+    return local[np.asarray(selected, dtype=int) - 1] + (cycle - 1) * period
 
 
-def make_velocity_observations(case: Config, inlet: InletData) -> VelocityData:
-    """Solve the truth case and sample its synthetic velocity observations."""
-
+def solve_truth_observations(
+    case: Config,
+    inlet: InletData,
+    progress: OptionalProgress = None,
+) -> tuple[Dynamic, Dynamic, VelocityData]:
+    """Solve the complete truth trajectory and sample velocity observations."""
     problem, parameters, cycles = _make_truth_problem(case, inlet)
-    truth = problem.solve(parameters, backend=case["solver"]["backend"])
+    solver = problem.create_solver(case["solver"]["backend"])
+    truth = solver.solve(
+        parameters,
+        progress=progress,
+    )
     points = observation_points(case)
     times = observation_times(case)
     operator = femx.VelocityObservationOperator(
@@ -59,8 +70,19 @@ def make_velocity_observations(case: Config, inlet: InletData) -> VelocityData:
         observation_times(case, cycle=cycles),
         components=range(problem.model.mesh.dimension),
     )
-    return VelocityData(
+    velocity = VelocityData(
         points=points,
         times=times,
         vals=operator.reshape(operator.predict(truth)),
     )
+    return problem.model, truth, velocity
+
+
+def make_velocity_observations(
+    case: Config,
+    inlet: InletData,
+    progress: OptionalProgress = None,
+) -> VelocityData:
+    """Solve the truth case and return its sampled velocity observations."""
+
+    return solve_truth_observations(case, inlet, progress)[2]
