@@ -25,7 +25,7 @@ Install femx and femx-cfd:
 
 ```shell
 python -m pip install \
-  "femx @ git+https://github.com/femx-project/femx.git@v0.2.0"
+  "femx @ git+https://github.com/femx-project/femx.git@v0.3.0"
 python -m pip install -e .
 ```
 
@@ -38,6 +38,8 @@ femx-cfd example forward
 femx-cfd example var
 femx-cfd example envar
 ```
+
+The Var workflow requires femx to be built with Enzyme support enabled.
 
 Each command runs a bundled, self-contained example. Results are written below
 `run/` by default, for example `run/var-example/`.

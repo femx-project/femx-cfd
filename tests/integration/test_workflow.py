@@ -78,7 +78,7 @@ class EnVarWorkflowTest(unittest.TestCase):
         self.assertEqual(envar.solver.num_solves, 3)
         self.assertEqual(
             envar.solver.assembly_calls,
-            3 * prob.model.num_steps,
+            prob.model.num_steps,
         )
 
     def test_writes_complete_truth_trajectory(self):
