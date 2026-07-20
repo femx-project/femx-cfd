@@ -17,7 +17,7 @@ EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "inverse" / "straig
 @pytest.mark.parametrize("method", ("var", "envar"))
 def test_runs_portable_inverse_case(method: str, tmp_path: Path) -> None:
     output = run_case(
-        EXAMPLE / f"{method}.yaml",
+        EXAMPLE / method / "case.yaml",
         tmp_path / method,
         progress_kind="console",
     )
@@ -37,7 +37,7 @@ def test_runs_portable_inverse_case(method: str, tmp_path: Path) -> None:
 
 
 def test_derives_initial_inlet_from_observations(tmp_path: Path) -> None:
-    document = yaml.safe_load((EXAMPLE / "var.yaml").read_text())
+    document = yaml.safe_load((EXAMPLE / "var" / "case.yaml").read_text())
     document["mesh"]["path"] = str(EXAMPLE / "mesh.msh")
     document["observations"]["path"] = str(EXAMPLE / "observations.h5")
     document["initialization"]["inlet"] = {
@@ -57,3 +57,8 @@ def test_derives_initial_inlet_from_observations(tmp_path: Path) -> None:
     inlet = load_inlet(output / "initial_inlet.h5")
     assert inlet.source == "velocity"
     assert inlet.boundary == "inlet"
+    assert inlet.vals.ndim == 3
+    with h5py.File(output / "initial_inlet.h5") as h5:
+        assert h5.attrs["format_version"] == 2
+        assert "velocity" in h5["inlet"]
+        assert "normal" not in h5["inlet"]

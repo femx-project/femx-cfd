@@ -1,4 +1,4 @@
-"""Mesh generation for the synthetic inverse example."""
+"""Straight-tube mesh generation for configurable synthetic cases."""
 
 from __future__ import annotations
 

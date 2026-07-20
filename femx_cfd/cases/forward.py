@@ -11,6 +11,7 @@ from femx_cfd._typing import Config, Dynamic, PathLike
 from femx_cfd.cases.migrations import migrate_forward_case
 from femx_cfd.cases.validation import (
     LENGTH_SCALES,
+    resolve_file,
     validate_fixed_boundaries,
     validate_solver,
 )
@@ -44,11 +45,17 @@ def _multiple(value: float, unit: float, name: str) -> int:
     return count
 
 
-def _validate_inlet(inlet: Config, dt: float, end_time: float) -> None:
+def _validate_inlet(
+    inlet: Config,
+    dt: float,
+    end_time: float,
+    base_dir: Optional[PathLike],
+) -> None:
     boundary = inlet.get("boundary")
     if not isinstance(boundary, str) or not boundary:
         raise ValueError("inlet.boundary must be a nonempty string")
 
+    source = inlet.get("source", "analytic")
     normal = inlet.get("normal", "auto")
     if not isinstance(normal, str):
         try:
@@ -57,6 +64,14 @@ def _validate_inlet(inlet: Config, dt: float, end_time: float) -> None:
             raise ValueError("inlet.normal must be 'auto' or a vector") from error
     elif normal != "auto":
         raise ValueError("inlet.normal must be 'auto' or a vector")
+    inlet["normal"] = normal
+
+    if source == "file":
+        inlet["source"] = source
+        inlet["path"] = resolve_file(inlet.get("path"), "inlet.path", base_dir)
+        return
+    if source != "analytic":
+        raise ValueError("inlet.source must be 'analytic' or 'file'")
 
     profile = _mapping(inlet.get("profile"), "inlet.profile")
     profile_kind = profile.get("kind")
@@ -82,8 +97,8 @@ def _validate_inlet(inlet: Config, dt: float, end_time: float) -> None:
     if cycles <= 0 or not np.isclose(ratio, cycles, rtol=0.0, atol=1.0e-10):
         raise ValueError("time.end_time must be an integer multiple of inlet.period")
 
-    inlet["normal"] = normal
     inlet["period"] = period
+    inlet["source"] = source
     inlet["waveform"] = waveform
 
 
@@ -129,7 +144,7 @@ def validate_forward_case(
     _multiple(time["end_time"], time["dt"], "time.end_time")
 
     inlet = _mapping(case.get("inlet"), "inlet")
-    _validate_inlet(inlet, time["dt"], time["end_time"])
+    _validate_inlet(inlet, time["dt"], time["end_time"], base_dir)
     case["boundary_conditions"] = validate_fixed_boundaries(
         case.get("boundary_conditions"),
         excluded={inlet["boundary"]},
@@ -140,7 +155,7 @@ def validate_forward_case(
 
 
 def load_forward_case(path: PathLike) -> Config:
-    """Load a YAML case, resolving its mesh relative to the YAML file."""
+    """Load a YAML case, resolving referenced inputs relative to the file."""
 
     case_path = Path(path).expanduser().resolve()
     if not case_path.is_file():

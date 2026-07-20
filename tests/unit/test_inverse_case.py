@@ -14,7 +14,7 @@ EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "inverse" / "straig
 
 class InverseCaseTest(unittest.TestCase):
     def test_loads_relative_inputs_for_var(self):
-        case = load_case(EXAMPLE / "var.yaml")
+        case = load_case(EXAMPLE / "var" / "case.yaml")
 
         self.assertEqual(case.format, INVERSE_FORMAT)
         self.assertEqual(case.version, 1)
@@ -32,31 +32,31 @@ class InverseCaseTest(unittest.TestCase):
         )
 
     def test_loads_envar_ensemble_options(self):
-        case = load_case(EXAMPLE / "envar.yaml")
+        case = load_case(EXAMPLE / "envar" / "case.yaml")
 
         self.assertEqual(case.resolved["method"], "envar")
         self.assertEqual(case.resolved["ensemble"]["workers"], 1)
         self.assertIn("flow_mean", case.resolved["ensemble"]["mode_scales"])
 
     def test_rejects_unknown_inverse_method(self):
-        document = yaml.safe_load((EXAMPLE / "var.yaml").read_text())
+        document = yaml.safe_load((EXAMPLE / "var" / "case.yaml").read_text())
         document["method"] = "other"
 
         with self.assertRaisesRegex(ValueError, "method"):
-            validate_inverse_case(document, base_dir=EXAMPLE)
+            validate_inverse_case(document, base_dir=EXAMPLE / "var")
 
     def test_rejects_no_slip_boundary_preset(self):
-        document = yaml.safe_load((EXAMPLE / "var.yaml").read_text())
+        document = yaml.safe_load((EXAMPLE / "var" / "case.yaml").read_text())
         document["boundary_conditions"][0] = {
             "boundary": "wall",
             "kind": "no_slip",
         }
 
         with self.assertRaisesRegex(ValueError, "velocity.*pressure"):
-            validate_inverse_case(document, base_dir=EXAMPLE)
+            validate_inverse_case(document, base_dir=EXAMPLE / "var")
 
     def test_accepts_observation_derived_initialization(self):
-        document = yaml.safe_load((EXAMPLE / "var.yaml").read_text())
+        document = yaml.safe_load((EXAMPLE / "var" / "case.yaml").read_text())
         document["initialization"]["inlet"] = {
             "source": "observations",
             "projection": {
@@ -67,12 +67,17 @@ class InverseCaseTest(unittest.TestCase):
             },
         }
 
-        case = validate_inverse_case(document, base_dir=EXAMPLE)
+        case = validate_inverse_case(document, base_dir=EXAMPLE / "var")
 
         self.assertEqual(case["initialization"]["inlet"]["source"], "observations")
+        self.assertEqual(
+            case["initialization"]["inlet"]["projection"]["temporal_weight"],
+            0.0,
+        )
+        self.assertEqual(case["control"]["normal"], "auto")
 
     def test_snapshot_keeps_referenced_paths_valid(self):
-        case = load_case(EXAMPLE / "var.yaml")
+        case = load_case(EXAMPLE / "var" / "case.yaml")
         destination = EXAMPLE / "nested" / "result"
 
         snapshot = snapshot_case(case, destination)

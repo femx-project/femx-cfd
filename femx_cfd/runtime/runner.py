@@ -65,7 +65,7 @@ def _run_inverse(
     runtime.barrier()
     if runtime.is_root:
         prog.stage("output: writing inverse result and flow trajectory")
-        save_inlet(destination / "initial_inlet.h5", solution.initial_inlet)
+        save_inlet(destination / "initial_inlet.h5", solution.initial_velocity)
         output.write_inverse_result(destination, solution)
 
 

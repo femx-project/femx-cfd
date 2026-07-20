@@ -1,5 +1,5 @@
 version: 1
 examples:
   forward: forward/straight_tube/case.yaml
-  var: inverse/straight_tube/var.yaml
-  envar: inverse/straight_tube/envar.yaml
+  var: inverse/straight_tube/var/case.yaml
+  envar: inverse/straight_tube/envar/case.yaml

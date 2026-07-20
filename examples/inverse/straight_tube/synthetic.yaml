@@ -1,0 +1,50 @@
+format: femx-cfd-synthetic
+version: 1
+
+mesh:
+  kind: straight_tube
+  length: 4.0
+  diameter: 1.0
+  cell_size: 0.25
+
+fluid:
+  rho: 1.0
+  mu: 0.01
+
+time:
+  period: 1.0
+  dt: 0.25
+  truth_cycles: 2
+
+truth:
+  direction: auto
+  profile:
+    kind: poisson
+    peak: 0.1
+    skew: 0.0
+  waveform:
+    kind: harmonics
+    mean: 1.0
+    terms:
+    - kind: sin
+      order: 1
+      amplitude: 0.3
+  solver:
+    backend: dense
+
+observations:
+  lower: [-1.75, -0.4]
+  upper: [1.75, 0.4]
+  counts: [8, 5]
+  phases: 4
+  noise:
+    std: 0.0
+    seed: 42
+
+reconstruction:
+  normal: auto
+  depth: 0.5
+  axial_decay: 0.25
+  laplacian_modes: 3
+  ridge: 0.001
+  temporal_weight: 0.0

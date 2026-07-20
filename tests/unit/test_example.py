@@ -46,7 +46,9 @@ class ExampleRunnerTest(unittest.TestCase):
                 code = run_cli(["example", "var", "--output", directory])
 
         self.assertEqual(code, 0)
-        self.assertEqual(Path(run.call_args.args[0]).name, "var.yaml")
+        case = Path(run.call_args.args[0])
+        self.assertEqual(case.name, "case.yaml")
+        self.assertEqual(case.parent.name, "var")
         self.assertEqual(run.call_args.kwargs["progress_kind"], "console")
         self.assertTrue(run.call_args.kwargs["finalize_runtime"])
 

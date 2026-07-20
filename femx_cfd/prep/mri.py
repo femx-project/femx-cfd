@@ -122,11 +122,12 @@ def _surface_stencils(
 def project_to_inlet(
     surface: Dynamic,
     pts: np.ndarray,
+    times: np.ndarray,
     vel: np.ndarray,
     normal: np.ndarray,
     opts: Config,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Fit MRI velocities to smooth inlet-normal profiles."""
+) -> np.ndarray:
+    """Reconstruct all MRI velocity components on a smooth inlet field."""
 
     dim = pts.shape[1]
     center, tangents, local = inlet_frame(surface, dim, normal)
@@ -151,7 +152,6 @@ def project_to_inlet(
     scales = np.max(np.abs(basis), axis=0)
     scaled_basis = basis / scales
     sample_basis = stencils @ scaled_basis
-    axial = vel[:, selected] @ normal
     decay = opts["axial_decay"]
     wts = np.exp(-0.5 * np.square(selected_dist / decay))
     weighted_basis = np.sqrt(wts)[:, None] * sample_basis
@@ -159,10 +159,48 @@ def project_to_inlet(
     penalties = np.concatenate(([0.0], np.sqrt(ridge) * eigvals / eigvals[0]))
     lhs = np.vstack((weighted_basis, np.diag(penalties)))
 
-    profs = []
-    for target in axial:
-        rhs = np.concatenate((np.sqrt(wts) * target, np.zeros(basis.shape[1])))
-        coeff = np.linalg.lstsq(lhs, rhs, rcond=None)[0]
-        profs.append(scaled_basis @ coeff)
+    targets = vel[:, selected]
+    rhs = np.asarray(
+        [
+            np.vstack(
+                (
+                    np.sqrt(wts)[:, None] * target,
+                    np.zeros((basis.shape[1], dim)),
+                )
+            )
+            for target in targets
+        ]
+    )
+    temporal_weight = float(opts.get("temporal_weight", 0.0))
+    if not np.isfinite(temporal_weight) or temporal_weight < 0.0:
+        raise ValueError("projection.temporal_weight must be nonnegative")
 
-    return normal, np.asarray(profs)
+    if temporal_weight == 0.0 or times.size == 1:
+        coeff = np.asarray(
+            [np.linalg.lstsq(lhs, target, rcond=None)[0] for target in rhs]
+        )
+    else:
+        block_lhs = np.kron(np.eye(times.size), lhs)
+        differences = np.zeros((times.size - 1, times.size))
+        indices = np.arange(times.size - 1)
+        steps = np.diff(times)
+        differences[indices, indices] = -1.0 / steps
+        differences[indices, indices + 1] = 1.0 / steps
+        temporal_lhs = np.sqrt(temporal_weight) * np.kron(
+            differences,
+            np.eye(basis.shape[1]),
+        )
+        system = np.vstack((block_lhs, temporal_lhs))
+        target = np.vstack(
+            (
+                rhs.reshape(-1, dim),
+                np.zeros((temporal_lhs.shape[0], dim)),
+            )
+        )
+        coeff = np.linalg.lstsq(system, target, rcond=None)[0].reshape(
+            times.size,
+            basis.shape[1],
+            dim,
+        )
+
+    return np.einsum("nb,tbd->tnd", scaled_basis, coeff)

@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Added explicit analytic and HDF5-file inlet modes to forward cases.
+- Added workflow-independent inlet HDF5 version 2 with inlet-node vector
+  velocity, case-owned normals, and version 1 read compatibility.
+- Added three-component MRI inlet reconstruction with optional temporal
+  regularization; its weight defaults to zero.
+- Made synthetic mesh, truth, observation, and inlet reconstruction generation
+  configurable through a versioned YAML document.
+- Added an independently configurable, internally normalized synthetic truth
+  direction; `auto` uses the inlet plane normal.
+- Kept Var and EnVar analysis cases independent from synthetic-data recipes.
+
+### Changed
+
+- Organized inverse examples as `var/case.yaml` and `envar/case.yaml`, with
+  shared synthetic data in the parent case directory.
+
 ## v0.3.1
 
 ### Changed

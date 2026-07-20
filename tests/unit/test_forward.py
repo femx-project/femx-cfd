@@ -18,7 +18,8 @@ from femx_cfd import (
 )
 from femx_cfd.cases import load_case
 from femx_cfd.cli import run_cli
-from femx_cfd.workflows.forward import solve_forward
+from femx_cfd.data import InletVelocityData, save_inlet
+from femx_cfd.workflows.forward import _file_inlet, solve_forward
 
 
 MESH = Path(__file__).resolve().parents[1] / "data" / "2d_tiny_tube.msh"
@@ -142,6 +143,34 @@ class ForwardCaseTest(unittest.TestCase):
             case["inlet"]["waveform"],
             {"kind": "uniform", "value": 1.0},
         )
+        self.assertEqual(case["inlet"]["source"], "analytic")
+
+    def test_loads_prepared_inlet_relative_to_case_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            shutil.copyfile(MESH, directory / "mesh.msh")
+            inlet_path = directory / "inlet.h5"
+            inlet_path.touch()
+            document = make_case()
+            document["inlet"] = {
+                "source": "file",
+                "boundary": "inlet",
+                "path": "inlet.h5",
+            }
+            case_path = directory / "case.yaml"
+            case_path.write_text(yaml.safe_dump(document), encoding="utf-8")
+
+            case = load_forward_case(case_path)
+
+        self.assertEqual(case["inlet"]["source"], "file")
+        self.assertEqual(case["inlet"]["path"], str(inlet_path.resolve()))
+
+    def test_rejects_unknown_inlet_source(self):
+        case = make_case(MESH)
+        case["inlet"]["source"] = "measurement"
+
+        with self.assertRaisesRegex(ValueError, "analytic.*file"):
+            validate_forward_case(case)
 
     def test_rejects_nonintegral_time_step_count(self):
         case = make_case(MESH)
@@ -192,6 +221,70 @@ class ForwardCaseTest(unittest.TestCase):
             options={"solve": "fgmres", "rtol": 1.0e-9},
         )
         self.assertIs(solution.trajectory, mock.sentinel.trajectory)
+
+    def test_repeats_periodic_prepared_inlet_for_forward_interval(self):
+        inlet = InletVelocityData(
+            boundary="inlet",
+            times=np.asarray([0.0, 0.25, 0.5]),
+            node_ids=np.asarray([4, 5]),
+            coords=np.asarray([[0.0, -0.5], [0.0, 0.5]]),
+            vals=np.asarray(
+                [
+                    [[1.0, 4.0], [2.0, 5.0]],
+                    [[1.5, 6.0], [2.5, 7.0]],
+                    [[1.0, 4.0], [2.0, 5.0]],
+                ]
+            ),
+            periodic=True,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "inlet.h5"
+            save_inlet(path, inlet)
+
+            prepared = _file_inlet(
+                {
+                    "time": {"dt": 0.25, "end_time": 1.0},
+                    "inlet": {
+                        "source": "file",
+                        "boundary": "inlet",
+                        "path": str(path),
+                    },
+                },
+                np.asarray([1.0, 0.0]),
+            )
+
+        np.testing.assert_allclose(prepared.times, [0.25, 0.5, 0.75, 1.0])
+        np.testing.assert_allclose(
+            prepared.vals,
+            [[1.5, 2.5], [1.0, 2.0], [1.5, 2.5], [1.0, 2.0]],
+        )
+        self.assertFalse(prepared.periodic)
+
+    def test_rejects_prepared_inlet_for_another_boundary(self):
+        inlet = InletVelocityData(
+            boundary="other",
+            times=np.asarray([0.0, 0.25]),
+            node_ids=np.asarray([4]),
+            coords=np.asarray([[0.0, 0.0]]),
+            vals=np.asarray([[[1.0, 0.0]], [[1.0, 0.0]]]),
+            periodic=True,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "inlet.h5"
+            save_inlet(path, inlet)
+
+            with self.assertRaisesRegex(ValueError, "boundary"):
+                _file_inlet(
+                    {
+                        "time": {"dt": 0.25, "end_time": 0.25},
+                        "inlet": {
+                            "source": "file",
+                            "boundary": "inlet",
+                            "path": str(path),
+                        },
+                    },
+                    np.asarray([1.0, 0.0]),
+                )
 
 
 if __name__ == "__main__":
