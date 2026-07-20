@@ -1,4 +1,4 @@
-"""Truth solves and velocity observations for the synthetic inverse example."""
+"""Truth solves and velocity observations for synthetic inverse cases."""
 
 from dataclasses import replace
 

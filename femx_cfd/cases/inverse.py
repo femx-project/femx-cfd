@@ -45,7 +45,16 @@ def _validate_control(value: Dynamic) -> Config:
         raise ValueError("control.boundary must be a nonempty string")
     if control.get("kind", "normal") != "normal":
         raise ValueError("control.kind must be 'normal'")
+    normal = control.get("normal", "auto")
+    if not isinstance(normal, str):
+        try:
+            normal = [float(component) for component in normal]
+        except (TypeError, ValueError) as error:
+            raise ValueError("control.normal must be 'auto' or a vector") from error
+    elif normal != "auto":
+        raise ValueError("control.normal must be 'auto' or a vector")
     control["kind"] = "normal"
+    control["normal"] = normal
     return control
 
 
@@ -106,6 +115,10 @@ def _validate_initialization(
         projection["ridge"] = nonnegative(
             projection.get("ridge", 0.0),
             "initialization.inlet.projection.ridge",
+        )
+        projection["temporal_weight"] = nonnegative(
+            projection.get("temporal_weight", 0.0),
+            "initialization.inlet.projection.temporal_weight",
         )
     else:
         raise ValueError("initialization.inlet.source must be 'file' or 'observations'")

@@ -12,12 +12,13 @@ from femx_cfd._typing import Dynamic, PathLike
 
 FORMAT = "femx-cfd"
 FORMAT_VERSION = 1
+INLET_FORMAT_VERSION = 2
 H5_SUFFIXES = {".h5", ".hdf5"}
 
 
 @dataclass(frozen=True)
 class InletData:
-    """Normal velocity sampled on FEM inlet nodes and time levels."""
+    """Prepared normal control sampled on FEM inlet nodes and time levels."""
 
     boundary: str
     times: np.ndarray
@@ -89,6 +90,52 @@ class InletData:
 
 
 @dataclass(frozen=True)
+class InletVelocityData:
+    """Vector velocity reconstructed on inlet nodes, independent of a control."""
+
+    boundary: str
+    times: np.ndarray
+    node_ids: np.ndarray
+    coords: np.ndarray
+    vals: np.ndarray
+    periodic: bool = True
+    source: str = ""
+
+    def __post_init__(self) -> None:
+        times = np.asarray(self.times, dtype=float)
+        node_ids = np.asarray(self.node_ids, dtype=np.int64)
+        coords = np.asarray(self.coords, dtype=float)
+        vals = np.asarray(self.vals, dtype=float)
+        if not isinstance(self.boundary, str) or not self.boundary:
+            raise ValueError("inlet boundary must be a nonempty string")
+        if times.ndim != 1 or times.size == 0 or np.any(np.diff(times) <= 0.0):
+            raise ValueError("inlet times must be increasing")
+        if node_ids.ndim != 1 or node_ids.size == 0:
+            raise ValueError("inlet node_ids must be a nonempty vector")
+        if (
+            coords.ndim != 2
+            or coords.shape[0] != node_ids.size
+            or coords.shape[1] not in (2, 3)
+        ):
+            raise ValueError("inlet coordinates have an incompatible shape")
+        if (
+            vals.ndim != 3
+            or vals.shape[:2] != (times.size, node_ids.size)
+            or vals.shape[2] not in (2, 3)
+        ):
+            raise ValueError("inlet vector velocity has an incompatible shape")
+        if not all(np.all(np.isfinite(array)) for array in (times, coords, vals)):
+            raise ValueError("inlet data must be finite")
+        if self.periodic and not np.allclose(vals[0], vals[-1]):
+            raise ValueError("periodic inlet must repeat its first velocity at the end")
+
+        object.__setattr__(self, "times", np.ascontiguousarray(times))
+        object.__setattr__(self, "node_ids", np.ascontiguousarray(node_ids))
+        object.__setattr__(self, "coords", np.ascontiguousarray(coords))
+        object.__setattr__(self, "vals", np.ascontiguousarray(vals))
+
+
+@dataclass(frozen=True)
 class VelocityData:
     """Discrete velocity samples shared by synthetic and MRI cases."""
 
@@ -121,19 +168,29 @@ def _path(path: PathLike) -> Path:
     return path
 
 
-def _write_header(h5: h5py.File, kind: str) -> None:
+def _write_header(
+    h5: h5py.File,
+    kind: str,
+    version: int = FORMAT_VERSION,
+) -> None:
     h5.attrs["format"] = FORMAT
-    h5.attrs["format_version"] = FORMAT_VERSION
+    h5.attrs["format_version"] = version
     h5.attrs["kind"] = kind
 
 
-def _check_header(h5: h5py.File, kind: str) -> None:
+def _check_header(
+    h5: h5py.File,
+    kind: str,
+    versions: tuple[int, ...] = (FORMAT_VERSION,),
+) -> int:
     if h5.attrs.get("format") != FORMAT:
         raise ValueError("not a femx-cfd HDF5 file")
-    if h5.attrs.get("format_version") != FORMAT_VERSION:
+    version = h5.attrs.get("format_version")
+    if version not in versions:
         raise ValueError("unsupported femx-cfd HDF5 format version")
     if h5.attrs.get("kind") != kind:
         raise ValueError(f"HDF5 data is not {kind}")
+    return int(version)
 
 
 def _group(h5: h5py.File, name: str, datasets: set[str]) -> h5py.Group:
@@ -203,13 +260,23 @@ def add_velocity_noise(
     )
 
 
-def save_inlet(path: PathLike, inlet: InletData) -> None:
-    """Save a prepared inlet boundary condition."""
+def save_inlet(path: PathLike, inlet: Dynamic) -> None:
+    """Save inlet vector velocity, expanding a legacy normal control if needed."""
 
-    if not isinstance(inlet, InletData):
-        raise TypeError("inlet must be InletData")
+    if isinstance(inlet, InletData):
+        inlet = InletVelocityData(
+            boundary=inlet.boundary,
+            times=inlet.times,
+            node_ids=inlet.node_ids,
+            coords=inlet.coords,
+            vals=inlet.vals[..., None] * inlet.normal,
+            periodic=inlet.periodic,
+            source=inlet.source,
+        )
+    if not isinstance(inlet, InletVelocityData):
+        raise TypeError("inlet must be InletVelocityData or InletData")
     with h5py.File(_path(path), "w") as h5:
-        _write_header(h5, "inlet")
+        _write_header(h5, "inlet", INLET_FORMAT_VERSION)
         h5.attrs["boundary"] = inlet.boundary
         h5.attrs["periodic"] = inlet.periodic
         h5.attrs["source"] = inlet.source
@@ -217,27 +284,38 @@ def save_inlet(path: PathLike, inlet: InletData) -> None:
         group.create_dataset("times", data=inlet.times)
         group.create_dataset("node_ids", data=inlet.node_ids)
         group.create_dataset("coordinates", data=inlet.coords)
-        group.create_dataset("normal", data=inlet.normal)
-        group.create_dataset("normal_velocity", data=inlet.vals)
+        group.create_dataset("velocity", data=inlet.vals, compression="gzip")
 
 
-def load_inlet(path: PathLike) -> InletData:
-    """Load a prepared inlet boundary condition."""
+def load_inlet(path: PathLike) -> InletVelocityData:
+    """Load inlet vector velocity, upgrading legacy normal-only data."""
 
     with h5py.File(_path(path), "r") as h5:
-        _check_header(h5, "inlet")
-        group = _group(
+        version = _check_header(
             h5,
             "inlet",
-            {"times", "node_ids", "coordinates", "normal", "normal_velocity"},
+            (FORMAT_VERSION, INLET_FORMAT_VERSION),
         )
-        return InletData(
+        datasets = {"times", "node_ids", "coordinates", "velocity"}
+        if version == FORMAT_VERSION:
+            datasets = {
+                "times",
+                "node_ids",
+                "coordinates",
+                "normal",
+                "normal_velocity",
+            }
+        group = _group(h5, "inlet", datasets)
+        if version == FORMAT_VERSION:
+            vals = group["normal_velocity"][...][..., None] * group["normal"][...]
+        else:
+            vals = group["velocity"][...]
+        return InletVelocityData(
             boundary=str(h5.attrs["boundary"]),
             times=group["times"][...],
             node_ids=group["node_ids"][...],
             coords=group["coordinates"][...],
-            normal=group["normal"][...],
-            vals=group["normal_velocity"][...],
+            vals=vals,
             periodic=bool(h5.attrs["periodic"]),
             source=str(h5.attrs.get("source", "")),
         )

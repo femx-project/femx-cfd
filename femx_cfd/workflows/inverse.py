@@ -8,10 +8,20 @@ import femx
 from femx_cfd._typing import Config, Dynamic, Progress
 from femx_cfd.cases.inverse import validate_inverse_case
 from femx_cfd.da import EnVar, Var
-from femx_cfd.data import InletData, load_inlet, load_velocity, make_velocity_obs
+from femx_cfd.data import (
+    InletData,
+    InletVelocityData,
+    load_inlet,
+    load_velocity,
+    make_velocity_obs,
+)
 from femx_cfd.mesh import mesh_in_meters
 from femx_cfd.models import navier_stokes as ns
-from femx_cfd.prep.inlet import inlet_normal, velocity_inlet
+from femx_cfd.prep.inlet import (
+    inlet_normal,
+    normal_inlet,
+    reconstruct_velocity_inlet,
+)
 
 from .boundaries import fixed_conditions
 
@@ -26,6 +36,7 @@ class InverseSolution:
     trajectory: Dynamic
     metrics: Config
     initial_inlet: InletData
+    initial_velocity: InletVelocityData
 
 
 def _problem_case(case: Config, mesh_path: Path, dimension: int) -> Config:
@@ -46,19 +57,22 @@ def _problem_case(case: Config, mesh_path: Path, dimension: int) -> Config:
     return problem
 
 
-def _initial_inlet(case: Config, mesh: Dynamic) -> InletData:
+def _initial_inlet(
+    case: Config,
+    mesh: Dynamic,
+) -> tuple[InletData, InletVelocityData]:
     options = case["initialization"]["inlet"]
+    boundary = case["control"]["boundary"]
+    surface = mesh.boundary(boundary)
+    normal = inlet_normal(
+        mesh,
+        surface,
+        case["control"]["normal"],
+    )
     if options["source"] == "file":
-        inlet = load_inlet(options["path"])
+        velocity = load_inlet(options["path"])
     else:
-        boundary = case["control"]["boundary"]
-        surface = mesh.boundary(boundary)
-        normal = inlet_normal(
-            mesh,
-            surface,
-            case["control"].get("normal", "auto"),
-        )
-        inlet = velocity_inlet(
+        velocity = reconstruct_velocity_inlet(
             surface,
             {
                 "file": case["observations"]["path"],
@@ -68,12 +82,15 @@ def _initial_inlet(case: Config, mesh: Dynamic) -> InletData:
             normal,
             boundary,
         )
-    if inlet.boundary != case["control"]["boundary"]:
-        raise ValueError("initial inlet boundary does not match control.boundary")
-    return inlet
+    return normal_inlet(velocity, normal, boundary), velocity
 
 
-def _solve_var(case: Config, inlet: InletData, prog: Progress) -> InverseSolution:
+def _solve_var(
+    case: Config,
+    inlet: InletData,
+    inlet_velocity: InletVelocityData,
+    prog: Progress,
+) -> InverseSolution:
     backend = case["solver"]["backend"]
     prob_options = {
         "times": inlet.times,
@@ -139,10 +156,16 @@ def _solve_var(case: Config, inlet: InletData, prog: Progress) -> InverseSolutio
             "message": result.msg,
         },
         initial_inlet=inlet,
+        initial_velocity=inlet_velocity,
     )
 
 
-def _solve_envar(case: Config, inlet: InletData, prog: Progress) -> InverseSolution:
+def _solve_envar(
+    case: Config,
+    inlet: InletData,
+    inlet_velocity: InletVelocityData,
+    prog: Progress,
+) -> InverseSolution:
     options = case["envar"]
 
     prog.stage("ensemble: building the initial-state basis")
@@ -207,6 +230,7 @@ def _solve_envar(case: Config, inlet: InletData, prog: Progress) -> InverseSolut
             "forward_solves": result.num_forwards,
         },
         initial_inlet=inlet,
+        initial_velocity=inlet_velocity,
     )
 
 
@@ -223,12 +247,12 @@ def solve_inverse(case: Config, progress: Progress) -> InverseSolution:
 
     with mesh_in_meters(case["mesh"]) as mesh_path:
         mesh = femx.Mesh.read(mesh_path)
-        inlet = _initial_inlet(case, mesh)
+        inlet, velocity = _initial_inlet(case, mesh)
         problem_case = _problem_case(case, mesh_path, mesh.dimension)
         problem_case["observations_path"] = case["observations"]["path"]
         if case["method"] == "var":
-            return _solve_var(problem_case, inlet, progress)
-        return _solve_envar(problem_case, inlet, progress)
+            return _solve_var(problem_case, inlet, velocity, progress)
+        return _solve_envar(problem_case, inlet, velocity, progress)
 
 
 __all__ = ["InverseSolution", "solve_inverse"]

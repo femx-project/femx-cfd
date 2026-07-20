@@ -84,6 +84,9 @@ def snapshot_case(case: LoadedCase, directory: PathLike) -> Config:
             document["mesh"] = relative
         else:
             document["mesh"]["path"] = relative
+        inlet = case.resolved["inlet"]
+        if inlet["source"] == "file":
+            document["inlet"]["path"] = os.path.relpath(inlet["path"], target)
     elif case.format == INVERSE_FORMAT:
         paths = (
             ("mesh", "path", case.resolved["mesh"]["path"]),

@@ -6,7 +6,7 @@ import femx
 import numpy as np
 
 from femx_cfd._typing import Config, Dynamic
-from femx_cfd.data import InletData, load_velocity
+from femx_cfd.data import InletData, InletVelocityData, load_velocity
 
 from .mri import project_to_inlet
 
@@ -61,7 +61,7 @@ def _periodic(
         return times, vals
     return (
         np.append(times, period),
-        np.vstack((vals, vals[0])),
+        np.concatenate((vals, vals[:1]), axis=0),
     )
 
 
@@ -166,18 +166,67 @@ def repeat_inlet(
     )
 
 
-def velocity_inlet(
+def normal_inlet(
+    inlet: InletVelocityData,
+    normal: np.ndarray,
+    boundary: Optional[str] = None,
+) -> InletData:
+    """Extract a prepared scalar normal control from inlet vector velocity."""
+
+    if not isinstance(inlet, InletVelocityData):
+        raise TypeError("inlet must be InletVelocityData")
+    if boundary is None:
+        boundary = inlet.boundary
+    if inlet.boundary != boundary:
+        raise ValueError("inlet HDF5 boundary does not match the configured boundary")
+    normal = np.asarray(normal, dtype=float)
+    if normal.shape != (inlet.vals.shape[2],):
+        raise ValueError("inlet normal and vector velocity dimensions do not match")
+    length = np.linalg.norm(normal)
+    if not np.isfinite(length) or length == 0.0:
+        raise ValueError("inlet normal must be finite and nonzero")
+    normal = normal / length
+    return InletData(
+        boundary=boundary,
+        times=inlet.times,
+        node_ids=inlet.node_ids,
+        coords=inlet.coords,
+        normal=normal,
+        vals=np.einsum("tnd,d->tn", inlet.vals, normal),
+        periodic=inlet.periodic,
+        source=inlet.source,
+    )
+
+
+def vector_inlet(inlet: InletData) -> InletVelocityData:
+    """Expand a prepared normal control into its equivalent vector velocity."""
+
+    if not isinstance(inlet, InletData):
+        raise TypeError("inlet must be InletData")
+    return InletVelocityData(
+        boundary=inlet.boundary,
+        times=inlet.times,
+        node_ids=inlet.node_ids,
+        coords=inlet.coords,
+        vals=inlet.vals[..., None] * inlet.normal,
+        periodic=inlet.periodic,
+        source=inlet.source,
+    )
+
+
+def reconstruct_velocity_inlet(
     surface: Dynamic,
     cfg: Config,
     normal: np.ndarray,
     boundary: Optional[str] = None,
-) -> InletData:
-    """Project prepared discrete velocities onto an inlet surface."""
+) -> InletVelocityData:
+    """Reconstruct MRI vector velocity on the inlet surface nodes."""
 
     velocity = load_velocity(cfg["file"])
-    normal, profiles = project_to_inlet(
+    profiles = project_to_inlet(
         surface,
         velocity.points,
+        velocity.times,
         velocity.vals,
         normal,
         cfg["projection"],
@@ -190,16 +239,32 @@ def velocity_inlet(
     active = surface.interior_node_ids
     if boundary is None:
         boundary = cfg["boundary"]
-    return InletData(
+    return InletVelocityData(
         boundary=boundary,
         times=times,
         node_ids=np.asarray(surface.mesh_node_ids)[active],
         coords=np.asarray(surface.coordinates)[active],
-        normal=normal,
         vals=vals[:, active],
         periodic=True,
         source="velocity",
     )
+
+
+def velocity_inlet(
+    surface: Dynamic,
+    cfg: Config,
+    normal: np.ndarray,
+    boundary: Optional[str] = None,
+) -> InletData:
+    """Reconstruct vector velocity and extract its configured normal control."""
+
+    reconstructed = reconstruct_velocity_inlet(
+        surface,
+        cfg,
+        normal,
+        boundary,
+    )
+    return normal_inlet(reconstructed, normal, boundary)
 
 
 def make_inlet(cfg: Config) -> InletData:
@@ -236,3 +301,22 @@ def make_inlet(cfg: Config) -> InletData:
     if opts["source"] == "velocity":
         return velocity_inlet(surface, opts, normal, boundary)
     raise ValueError("inlet source must be 'analytic' or 'velocity'")
+
+
+def make_inlet_velocity(cfg: Config) -> InletVelocityData:
+    """Build workflow-independent inlet vector velocity from a plain config."""
+
+    opts = cfg["inlet"]
+    if opts["source"] == "analytic":
+        return vector_inlet(make_inlet(cfg))
+    if opts["source"] != "velocity":
+        raise ValueError("inlet source must be 'analytic' or 'velocity'")
+
+    mesh = femx.Mesh.read(cfg["mesh"])
+    control = cfg["control"]
+    if control["kind"] != "normal":
+        raise ValueError("control.kind must be 'normal'")
+    boundary = control["boundary"]
+    surface = mesh.boundary(boundary)
+    normal = inlet_normal(mesh, surface, control.get("normal", "auto"))
+    return reconstruct_velocity_inlet(surface, opts, normal, boundary)

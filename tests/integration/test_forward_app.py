@@ -7,10 +7,12 @@ import unittest
 from pathlib import Path
 
 import h5py
+import numpy as np
 import yaml
 
 from femx_cfd.cli import run_forward_cli as run_cli
 from femx_cfd import CASE_FORMAT, CASE_VERSION
+from femx_cfd.data import InletVelocityData, save_inlet
 
 
 MESH = Path(__file__).resolve().parents[1] / "data" / "2d_tiny_tube.msh"
@@ -73,6 +75,60 @@ class ForwardApplicationTest(unittest.TestCase):
             self.assertEqual(events[0]["type"], "stage")
             self.assertEqual(events[-1]["type"], "stage")
             self.assertIn("complete", events[-1]["message"])
+
+    def test_runs_with_prepared_inlet_hdf5(self):
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            shutil.copyfile(MESH, directory / "mesh.msh")
+            save_inlet(
+                directory / "inlet.h5",
+                InletVelocityData(
+                    boundary="inlet",
+                    times=np.asarray([0.0, 0.25]),
+                    node_ids=np.asarray([1]),
+                    coords=np.asarray([[0.0, 0.0005, 0.0]]),
+                    vals=np.asarray([[[0.1, 0.03]], [[0.1, 0.03]]]),
+                    periodic=True,
+                    source="analytic",
+                ),
+            )
+            case = {
+                "format": CASE_FORMAT,
+                "version": CASE_VERSION,
+                "mesh": {"path": "mesh.msh", "length_unit": "mm"},
+                "fluid": {"rho": 1.0, "mu": 0.01},
+                "time": {"dt": 0.25, "end_time": 0.25},
+                "inlet": {
+                    "source": "file",
+                    "boundary": "inlet",
+                    "path": "inlet.h5",
+                },
+                "boundary_conditions": [
+                    {
+                        "boundary": "wall",
+                        "kind": "velocity",
+                        "value": [0.0, 0.0],
+                    },
+                    {
+                        "boundary": "outlet",
+                        "kind": "pressure",
+                        "value": 0.0,
+                    },
+                ],
+                "solver": {"backend": "dense"},
+            }
+            case_path = directory / "case.yaml"
+            case_path.write_text(yaml.safe_dump(case), encoding="utf-8")
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = run_cli([str(case_path)])
+
+            self.assertEqual(code, 0)
+            self.assertTrue((directory / "result" / "flow.h5").is_file())
+            snapshot = yaml.safe_load(
+                (directory / "result" / "case.yaml").read_text(encoding="utf-8")
+            )
+            self.assertEqual(snapshot["inlet"]["path"], "../inlet.h5")
 
     def test_does_not_overwrite_an_existing_result(self):
         with tempfile.TemporaryDirectory() as directory:

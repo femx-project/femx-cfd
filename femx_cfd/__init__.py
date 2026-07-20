@@ -2,6 +2,7 @@
 
 from .data import (
     InletData,
+    InletVelocityData,
     VelocityData,
     add_velocity_noise,
     load_inlet,
@@ -28,6 +29,7 @@ __all__ = [
     "CASE_VERSION",
     "ForwardSolution",
     "InletData",
+    "InletVelocityData",
     "InverseSolution",
     "LoadedCase",
     "VelocityData",

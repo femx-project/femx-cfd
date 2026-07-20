@@ -17,6 +17,7 @@ solver:
   backend: petsc
 
 inlet:
+  source: analytic
   boundary: inlet
   normal: auto
   profile:
