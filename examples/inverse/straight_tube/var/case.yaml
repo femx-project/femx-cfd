@@ -1,5 +1,5 @@
 format: femx-cfd-inverse
-version: 1
+version: 2
 method: var
 
 mesh:
@@ -20,8 +20,7 @@ solver:
 
 control:
   boundary: inlet
-  kind: normal
-  normal: auto
+  kind: vector
 
 boundary_conditions:
 - boundary: wall
@@ -33,12 +32,12 @@ boundary_conditions:
 
 observations:
   kind: velocity
-  path: ../observations.h5
+  path: ../observation/velocity.h5
 
 initialization:
   inlet:
     source: file
-    path: ../initial_inlet.h5
+    path: ../inlet/initial_velocity.h5
 
 algorithm:
   optimizer: scipy
@@ -46,7 +45,7 @@ algorithm:
   gradient_tolerance: 0.001
   function_tolerance: 1.0e-12
   control_bounds:
-  - 0.0
+  - -0.2
   - 0.2
   regularization:
     background: 0.01

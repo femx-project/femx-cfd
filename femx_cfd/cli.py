@@ -22,7 +22,7 @@ def _run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "-o",
         "--output",
-        help="result directory (default: result beside the case file)",
+        help="result directory relative to the current directory (default: result beside the case file)",
     )
     parser.add_argument(
         "--progress",

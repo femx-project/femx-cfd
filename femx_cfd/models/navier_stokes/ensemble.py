@@ -1,13 +1,14 @@
 """Initial-state and inlet ensembles for Navier--Stokes models."""
 
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from dataclasses import dataclass
 from multiprocessing import get_context
+from queue import Empty
 
 import femx
 import numpy as np
 
-from femx_cfd._typing import Config, Dynamic, ReportCallback
+from femx_cfd._typing import Config, Dynamic, OptionalProgress, ReportCallback
 from femx_cfd.data import make_velocity_obs
 
 from .problem import make_problem
@@ -15,6 +16,7 @@ from .problem import make_problem
 
 @dataclass(frozen=True)
 class Spinup:
+    names: tuple[str, ...]
     init_mean: np.ndarray
     init_modes: np.ndarray
     ctr_mean: np.ndarray
@@ -25,9 +27,12 @@ def _surface_mode(prob: Dynamic, index: int) -> np.ndarray:
     """Return a normalized Dirichlet surface mode on active control nodes."""
     surface = prob.model.mesh.boundary(prob.ctr.boundary)
     local = {int(node): idx for idx, node in enumerate(surface.mesh_node_ids)}
+    control_nodes = np.asarray(prob.ctr_mesh_node_ids, dtype=np.int64)
+    _, first = np.unique(control_nodes, return_index=True)
+    control_nodes = control_nodes[np.sort(first)]
     try:
         active = np.asarray(
-            [local[int(node)] for node in prob.ctr_mesh_node_ids],
+            [local[int(node)] for node in control_nodes],
             dtype=np.int64,
         )
     except KeyError as error:
@@ -42,47 +47,77 @@ def _surface_mode(prob: Dynamic, index: int) -> np.ndarray:
     return values / scale
 
 
+def _spatial_mode(prob: Dynamic, definition: Config, size: int) -> np.ndarray:
+    """Evaluate one configured inlet-surface mode on control nodes."""
+    kind = definition["kind"]
+    if kind == "uniform":
+        return np.ones(size)
+    if kind == "surface_laplacian":
+        return _surface_mode(prob, definition["index"])
+    raise ValueError(f"unsupported ensemble spatial mode: {kind}")
+
+
+def _temporal_mode(
+    times: np.ndarray,
+    period: float,
+    definition: Config,
+) -> np.ndarray:
+    """Evaluate one configured periodic temporal mode."""
+    kind = definition["kind"]
+    if kind == "constant":
+        return np.ones_like(times)
+    angle = definition["order"] * 2.0 * np.pi * times / period
+    angle += definition.get("phase", 0.0)
+    if kind == "sine":
+        return np.sin(angle)
+    if kind == "cosine":
+        return np.cos(angle)
+    raise ValueError(f"unsupported ensemble temporal mode: {kind}")
+
+
 def _analytic_ctr_modes(
     cfg: Config,
     prob: Dynamic,
     ctr_mean: np.ndarray,
 ) -> tuple[list[str], np.ndarray]:
     times = np.asarray(prob.ctr.times)[: prob.num_ctr_levels]
-    T = cfg["time"]["T"]
-    omega = 2.0 * np.pi / T
     profile = ctr_mean.reshape(prob.param_shape)
-    scales = cfg["ensemble"]["mode_scales"]
-    needs_skew = any(name.startswith("skew_") for name in scales)
-    needs_shape = any(name.startswith("shape_") for name in scales)
-    skew = _surface_mode(prob, 1) if needs_skew else None
-    shape = _surface_mode(prob, 0) if needs_shape else None
-    uniform = np.ones(profile.shape[1])
-    one = np.ones_like(times)
-    sin1 = np.sin(omega * times)
-    cos1 = np.cos(omega * times)
-    sin2 = np.sin(2.0 * omega * times)
-    cos2 = np.cos(2.0 * omega * times)
-    defs = (
-        ("flow_mean", one, uniform),
-        ("flow_sin1", sin1, uniform),
-        ("flow_cos1", cos1, uniform),
-        ("flow_sin2", sin2, uniform),
-        ("flow_cos2", cos2, uniform),
-        ("skew_mean", one, skew),
-        ("skew_sin1", sin1, skew),
-        ("skew_cos1", cos1, skew),
-        ("shape_mean", one, shape),
-        ("shape_cos2", cos2, shape),
-    )
+    vector = prob.ctr.kind == "vector"
+    dimension = int(prob.model.mesh.dimension)
+    if vector:
+        if profile.shape[1] % dimension:
+            raise ValueError("vector control size must be divisible by mesh dimension")
+        profile = np.linalg.norm(
+            profile.reshape(profile.shape[0], -1, dimension),
+            axis=2,
+        )
+    modes_cfg = cfg["ensemble"]["modes"]
+    spatial_cfg = modes_cfg["spatial"]
+    temporal_cfg = modes_cfg["temporal"]
     names = []
     modes = []
-    for name, temporal, spatial in defs:
-        if name not in scales:
+    for definition in modes_cfg["combined"]:
+        name = definition["name"]
+        spatial = _spatial_mode(
+            prob,
+            spatial_cfg[definition["spatial"]],
+            profile.shape[1],
+        )
+        temporal = _temporal_mode(
+            times,
+            cfg["time"]["T"],
+            temporal_cfg[definition["temporal"]],
+        )
+        vals = definition["scale"] * temporal[:, None] * profile * spatial
+        if not vector:
+            names.append(name)
+            modes.append(vals.reshape(-1))
             continue
-
-        vals = scales[name] * temporal[:, None] * profile * spatial
-        names.append(name)
-        modes.append(vals.reshape(-1))
+        for component, axis in enumerate("xyz"[:dimension]):
+            component_vals = np.zeros((*vals.shape, dimension))
+            component_vals[..., component] = vals
+            names.append(f"{name}_{axis}")
+            modes.append(component_vals.reshape(-1))
     return names, np.column_stack(modes)
 
 
@@ -100,12 +135,96 @@ def _init_modes_from_states(
     return np.ascontiguousarray(modes)
 
 
+def _member_progress(
+    progress: OptionalProgress,
+    stage: str,
+    member: str,
+) -> OptionalProgress:
+    if progress is None:
+        return None
+
+    def report(event: Dynamic) -> None:
+        if event.get("type") != "solve":
+            return
+        progress(
+            {
+                "type": "ensemble_solve",
+                "stage": stage,
+                "member": member,
+                "phase": event["phase"],
+                "step": event["step"],
+                "total": event["total"],
+            }
+        )
+
+    return report
+
+
+_WORKER_PROGRESS_QUEUE: Dynamic = None
+
+
+def _set_worker_progress_queue(queue: Dynamic) -> None:
+    global _WORKER_PROGRESS_QUEUE
+    _WORKER_PROGRESS_QUEUE = queue
+
+
+def _queue_member_progress(
+    queue: Dynamic,
+    stage: str,
+    member: str,
+    event: Dynamic,
+) -> None:
+    if event.get("type") != "solve":
+        return
+    queue.put(
+        {
+            "type": "ensemble_solve",
+            "stage": stage,
+            "member": member,
+            "phase": event["phase"],
+            "step": event["step"],
+            "total": event["total"],
+        }
+    )
+
+
+def _run_member(
+    func: Dynamic,
+    args: tuple[Dynamic, ...],
+    stage: str,
+    member: str,
+) -> Dynamic:
+    """Run one picklable ensemble task and relay solve events to its parent."""
+    if _WORKER_PROGRESS_QUEUE is None:
+        raise RuntimeError("ensemble worker progress queue is unavailable")
+    return func(
+        *args,
+        progress=lambda event: _queue_member_progress(
+            _WORKER_PROGRESS_QUEUE,
+            stage,
+            member,
+            event,
+        ),
+    )
+
+
+def _drain_progress(queue: Dynamic, progress: OptionalProgress) -> None:
+    while True:
+        try:
+            progress(queue.get_nowait())
+        except Empty:
+            return
+
+
 def _parallel_map(
     func: Dynamic,
-    args: Dynamic,
+    args: list[tuple[Dynamic, ...]],
     names: list[str],
     workers: int,
     report: ReportCallback,
+    *,
+    stage: str = "ensemble",
+    progress: OptionalProgress = None,
 ) -> list[Dynamic]:
     if workers <= 0:
         raise ValueError("ensemble.workers must be positive")
@@ -114,23 +233,55 @@ def _parallel_map(
         results = []
 
         for idx, (arg, name) in enumerate(zip(args, names), start=1):
-            results.append(func(*arg))
+            results.append(func(*arg, progress=_member_progress(progress, stage, name)))
             report(f"ensemble: {name} complete ({idx}/{len(args)})")
 
         return results
 
     results = [None] * len(args)
 
-    with ProcessPoolExecutor(
-        max_workers=workers,
-        mp_context=get_context("spawn"),
-    ) as pool:
-        futures = {pool.submit(func, *arg): idx for idx, arg in enumerate(args)}
+    context = get_context("spawn")
+    if progress is None:
+        with ProcessPoolExecutor(max_workers=workers, mp_context=context) as pool:
+            futures = {pool.submit(func, *arg): idx for idx, arg in enumerate(args)}
+            completed = 0
+            while futures:
+                done, _ = wait(futures, return_when=FIRST_COMPLETED)
+                for future in done:
+                    idx = futures.pop(future)
+                    results[idx] = future.result()
+                    completed += 1
+                    report(f"ensemble: {names[idx]} complete ({completed}/{len(args)})")
+        return results
 
-        for done, future in enumerate(as_completed(futures), start=1):
-            idx = futures[future]
-            results[idx] = future.result()
-            report(f"ensemble: {names[idx]} complete ({done}/{len(args)})")
+    queue = context.Queue()
+    try:
+        with ProcessPoolExecutor(
+            max_workers=workers,
+            mp_context=context,
+            initializer=_set_worker_progress_queue,
+            initargs=(queue,),
+        ) as progress_pool:
+            futures = {
+                progress_pool.submit(_run_member, func, arg, stage, names[idx]): idx
+                for idx, arg in enumerate(args)
+            }
+            completed = 0
+            while futures:
+                done, _ = wait(
+                    futures,
+                    timeout=0.05,
+                    return_when=FIRST_COMPLETED,
+                )
+                _drain_progress(queue, progress)
+                for future in done:
+                    idx = futures.pop(future)
+                    results[idx] = future.result()
+                    completed += 1
+                    report(f"ensemble: {names[idx]} complete ({completed}/{len(args)})")
+            _drain_progress(queue, progress)
+    finally:
+        queue.close()
 
     return results
 
@@ -154,21 +305,23 @@ def _spinup_state(
     cfg: Config,
     inlet: Dynamic,
     params: np.ndarray,
+    progress: OptionalProgress = None,
 ) -> np.ndarray:
     prob = make_problem(
         cfg,
         times=inlet.times,
         periodic=inlet.periodic,
-        normal=inlet.normal,
+        normal=getattr(inlet, "normal", None),
     )
     solver = prob.create_solver(cfg["solver"]["backend"])
-    return solver.solve(params).values[-1]
+    return solver.solve(params, progress=progress).values[-1]
 
 
 def build_ensemble(
     cfg: Config,
     inlet: Dynamic,
     report: ReportCallback = lambda _message: None,
+    progress: OptionalProgress = None,
 ) -> Spinup:
     """Run spin-up members and build initial-state and inlet modes."""
 
@@ -176,7 +329,7 @@ def build_ensemble(
         cfg,
         times=inlet.times,
         periodic=inlet.periodic,
-        normal=inlet.normal,
+        normal=getattr(inlet, "normal", None),
     )
     ctr_mean = inlet.params_for(prob)
     names, ctr_modes = _analytic_ctr_modes(cfg, prob, ctr_mean)
@@ -192,7 +345,12 @@ def build_ensemble(
 
         for idx, (label, param) in enumerate(zip(labels, params), start=1):
             report(f"{label} ({idx}/{len(params)})")
-            states.append(solver.solve(param).values[-1])
+            states.append(
+                solver.solve(
+                    param,
+                    progress=_member_progress(progress, "spin-up", label),
+                ).values[-1]
+            )
     else:
         args = [(cfg, inlet, param) for param in params]
         states = _parallel_map(
@@ -201,10 +359,13 @@ def build_ensemble(
             labels,
             workers,
             report,
+            stage="spin-up",
+            progress=progress,
         )
 
     init_mean = states[0].copy()
     return Spinup(
+        names=tuple(names),
         init_mean=init_mean,
         init_modes=_init_modes_from_states(prob, init_mean, states[1:]),
         ctr_mean=ctr_mean,
@@ -218,18 +379,19 @@ def _obs_prediction(
     spin: Spinup,
     velocity: Dynamic,
     params: np.ndarray,
+    progress: OptionalProgress = None,
 ) -> np.ndarray:
     prob = make_problem(
         cfg,
         times=inlet.times,
         periodic=inlet.periodic,
-        normal=inlet.normal,
+        normal=getattr(inlet, "normal", None),
         init_mean=spin.init_mean,
         init_modes=spin.init_modes,
     )
     obs = make_velocity_obs(velocity, prob.model)
     solver = prob.create_solver(cfg["solver"]["backend"])
-    traj = solver.solve(params)
+    traj = solver.solve(params, progress=progress)
     return obs.op.predict(traj)
 
 
@@ -240,6 +402,7 @@ def build_obs_basis(
     velocity: Dynamic,
     param_basis: Dynamic,
     report: ReportCallback = lambda _message: None,
+    progress: OptionalProgress = None,
 ) -> Dynamic:
     """Build the EnVar observation basis with parallel forward solves."""
 
@@ -257,6 +420,8 @@ def build_obs_basis(
         labels,
         _ensemble_workers(cfg, report),
         report,
+        stage="observation",
+        progress=progress,
     )
 
     mean_pred = predictions[0]

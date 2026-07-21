@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from femx_cfd.prep.inlet import analytic_inlet, inlet_normal, repeat_inlet
+from femx_cfd.prep.inlet import _periodic, analytic_inlet, inlet_normal, repeat_inlet
 
 
 class Surface:
@@ -72,6 +72,14 @@ class InletNormalTest(unittest.TestCase):
 
 
 class AnalyticInletTest(unittest.TestCase):
+    def test_extends_one_velocity_snapshot_as_a_constant_periodic_inlet(self):
+        vals = np.asarray([[[1.0, 0.25], [2.0, 0.5]]])
+
+        times, periodic_vals = _periodic(np.asarray([0.25]), vals, 1.0)
+
+        np.testing.assert_allclose(times, [0.0, 1.0])
+        np.testing.assert_allclose(periodic_vals, np.concatenate((vals, vals)))
+
     def test_evaluates_profile_and_waveform(self):
         cfg = {
             "T": 1.0,

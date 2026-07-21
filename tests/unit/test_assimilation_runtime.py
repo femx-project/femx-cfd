@@ -7,6 +7,18 @@ import numpy as np
 
 from femx_cfd import VelocityData, save_velocity
 from femx_cfd.runtime.output import bundle_result, write_observations
+from femx_cfd.runtime.runner import result_path
+
+
+class ResultPathTest(unittest.TestCase):
+    def test_explicit_result_path_is_relative_to_the_current_directory(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            case = Path(tmp_dir) / "nested" / "case.yaml"
+
+            result = result_path(case, "runs/example")
+
+        self.assertEqual(result, (Path.cwd() / "runs/example").resolve())
+        self.assertEqual(result_path(case), case.parent / "result")
 
 
 class ResultBundleTest(unittest.TestCase):
@@ -62,18 +74,18 @@ class ObservationVtuTest(unittest.TestCase):
             save_velocity(heavy, velocity)
             pvd = write_observations(heavy, velocity)
             pvd_text = pvd.read_text(encoding="utf-8")
-            first = Path(tmp_dir) / "observations/observation_00000.vtu"
-            second = Path(tmp_dir) / "observations/observation_00001.vtu"
+            first = Path(tmp_dir) / "velocity/velocity_00000.vtu"
+            second = Path(tmp_dir) / "velocity/velocity_00001.vtu"
             first_text = first.read_text(encoding="utf-8")
 
             self.assertTrue(first.is_file())
             self.assertTrue(second.is_file())
 
-        self.assertEqual(pvd.name, "observations.pvd")
+        self.assertEqual(pvd.name, "velocity.pvd")
         self.assertIn('timestep="0"', pvd_text)
         self.assertIn('timestep="0.5"', pvd_text)
-        self.assertIn('file="observations/observation_00000.vtu"', pvd_text)
-        self.assertIn('file="observations/observation_00001.vtu"', pvd_text)
+        self.assertIn('file="velocity/velocity_00000.vtu"', pvd_text)
+        self.assertIn('file="velocity/velocity_00001.vtu"', pvd_text)
         self.assertIn('NumberOfPoints="2"', first_text)
         self.assertIn('NumberOfCells="2"', first_text)
         self.assertIn('Name="velocity"', first_text)

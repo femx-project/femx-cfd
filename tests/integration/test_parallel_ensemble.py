@@ -40,7 +40,18 @@ class ParallelEnsembleIntegrationTest(unittest.TestCase):
             "solver": {"backend": "petsc"},
             "ensemble": {
                 "workers": 2,
-                "mode_scales": {"flow_mean": 0.1},
+                "modes": {
+                    "spatial": {"uniform": {"kind": "uniform"}},
+                    "temporal": {"mean": {"kind": "constant"}},
+                    "combined": [
+                        {
+                            "name": "flow_mean",
+                            "spatial": "uniform",
+                            "temporal": "mean",
+                            "scale": 0.1,
+                        }
+                    ],
+                },
             },
         }
         mesh = femx.Mesh.read(MESH_FILE)
@@ -60,7 +71,8 @@ class ParallelEnsembleIntegrationTest(unittest.TestCase):
             vals=np.zeros((2, 2, 2)),
         )
 
-        spin = ns.build_ensemble(cfg, inlet)
+        events = []
+        spin = ns.build_ensemble(cfg, inlet, progress=events.append)
         prob = ns.make_problem(
             cfg,
             times=inlet.times,
@@ -80,11 +92,24 @@ class ParallelEnsembleIntegrationTest(unittest.TestCase):
             spin,
             velocity,
             param_basis,
+            progress=events.append,
         )
 
         self.assertEqual(spin.init_modes.shape[1], 1)
         self.assertEqual(obs_basis.num_coefficients, 1)
         self.assertEqual(obs_basis.value_size, 8)
+        self.assertTrue(
+            any(
+                event["type"] == "ensemble_solve" and event["stage"] == "spin-up"
+                for event in events
+            )
+        )
+        self.assertTrue(
+            any(
+                event["type"] == "ensemble_solve" and event["stage"] == "observation"
+                for event in events
+            )
+        )
 
 
 if __name__ == "__main__":

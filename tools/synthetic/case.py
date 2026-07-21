@@ -6,12 +6,17 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from femx_cfd._typing import Config, Dynamic, PathLike
+from femx_cfd._typing import Config, Dynamic, OptionalProgress, PathLike
 from femx_cfd.data import add_velocity_noise, save_inlet, save_velocity
 from femx_cfd.prep.inlet import make_inlet, make_inlet_velocity
+from femx_cfd.runtime.output import (
+    write_observations,
+    write_truth,
+    write_truth_samples,
+)
 
 from .mesh import write_straight_tube
-from .observation import make_velocity_observations
+from .observation import observation_times, solve_truth_observations
 
 
 SYNTHETIC_FORMAT = "femx-cfd-synthetic"
@@ -155,6 +160,21 @@ def validate_synthetic_config(value: Dynamic) -> Config:
         observations.get("phases"),
         "observations.phases",
     )
+    selected_phases = observations.get(
+        "selected_phases",
+        list(range(1, observations["phases"] + 1)),
+    )
+    if not isinstance(selected_phases, list) or not selected_phases:
+        raise ValueError("observations.selected_phases must be a nonempty list")
+    selected_phases = [
+        _positive_integer(phase, f"observations.selected_phases[{index}]")
+        for index, phase in enumerate(selected_phases)
+    ]
+    if selected_phases != sorted(set(selected_phases)):
+        raise ValueError("observations.selected_phases must be unique and increasing")
+    if selected_phases[-1] > observations["phases"]:
+        raise ValueError("observations.selected_phases must not exceed phases")
+    observations["selected_phases"] = selected_phases
     noise = _mapping(observations.get("noise", {}), "observations.noise")
     noise["std"] = _nonnegative(noise.get("std", 0.0), "observations.noise.std")
     seed = noise.get("seed", 0)
@@ -224,8 +244,9 @@ def build_synthetic_case(
     output: PathLike,
     *,
     force: bool = False,
+    progress: OptionalProgress = None,
 ) -> Path:
-    """Generate a mesh, observations, and an inlet reconstruction."""
+    """Generate a mesh, truth fields, observations, and an inlet reconstruction."""
 
     cfg = validate_synthetic_config(value)
     output = Path(output).expanduser().resolve()
@@ -233,8 +254,15 @@ def build_synthetic_case(
         output / name
         for name in (
             "mesh.msh",
-            "observations.h5",
-            "initial_inlet.h5",
+            "reference/flow_full.h5",
+            "reference/flow_full.xdmf",
+            "reference/flow_window.h5",
+            "reference/flow_window.xdmf",
+            "reference/flow_observation.h5",
+            "reference/flow_observation.xdmf",
+            "observation/velocity.h5",
+            "observation/velocity.pvd",
+            "inlet/initial_velocity.h5",
         )
     )
     existing = [path for path in expected if path.exists()]
@@ -244,8 +272,10 @@ def build_synthetic_case(
     output.mkdir(parents=True, exist_ok=True)
 
     mesh_path = output / "mesh.msh"
-    velocity_path = output / "observations.h5"
-    inlet_path = output / "initial_inlet.h5"
+    velocity_path = output / "observation" / "velocity.h5"
+    inlet_path = output / "inlet" / "initial_velocity.h5"
+    velocity_path.parent.mkdir(parents=True, exist_ok=True)
+    inlet_path.parent.mkdir(parents=True, exist_ok=True)
     mesh = cfg["mesh"]
     write_straight_tube(
         mesh_path,
@@ -285,11 +315,43 @@ def build_synthetic_case(
         "solver": truth["solver"],
         "observation": {
             name: cfg["observations"][name]
-            for name in ("lower", "upper", "counts", "phases")
+            for name in (
+                "lower",
+                "upper",
+                "counts",
+                "phases",
+                "selected_phases",
+            )
         },
     }
     truth_inlet = make_inlet(truth_case)
-    velocity = make_velocity_observations(truth_case, truth_inlet)
+    model, trajectory, velocity = solve_truth_observations(
+        truth_case,
+        truth_inlet,
+        progress,
+    )
+    reference_dir = output / "reference"
+    reference_dir.mkdir(parents=True, exist_ok=True)
+    truth_full_path = reference_dir / "flow_full.h5"
+    write_truth(truth_full_path, model, trajectory)
+    window_steps = int(round(time["period"] / time["dt"]))
+    window_times = np.linspace(0.0, time["period"], window_steps + 1)
+    window_offset = (time["truth_cycles"] - 1) * time["period"]
+    write_truth_samples(
+        truth_full_path,
+        reference_dir / "flow_window.h5",
+        window_times,
+        time["dt"],
+        source_times=window_times + window_offset,
+    )
+    phase_times = observation_times(truth_case)
+    write_truth_samples(
+        truth_full_path,
+        reference_dir / "flow_observation.h5",
+        phase_times,
+        time["dt"],
+        source_times=phase_times + window_offset,
+    )
     noise = cfg["observations"]["noise"]
     if noise["std"] > 0.0:
         velocity = add_velocity_noise(
@@ -298,6 +360,7 @@ def build_synthetic_case(
             seed=noise["seed"],
         )
     save_velocity(velocity_path, velocity)
+    write_observations(velocity_path, velocity)
 
     reconstruction = cfg["reconstruction"]
     inlet_case = {
@@ -334,6 +397,7 @@ def build_from_file(
     output: PathLike,
     *,
     force: bool = False,
+    progress: OptionalProgress = None,
 ) -> Path:
     """Generate a synthetic case from a YAML configuration file."""
 
@@ -341,6 +405,7 @@ def build_from_file(
         load_synthetic_config(config),
         output,
         force=force,
+        progress=progress,
     )
 
 

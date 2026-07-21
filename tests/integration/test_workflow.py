@@ -64,7 +64,8 @@ class EnVarWorkflowTest(unittest.TestCase):
             basis,
             prior_weight=0.0,
         )
-        res = envar.solve()
+        events = []
+        res = envar.solve(prog=events.append)
 
         self.assertEqual(envar.backend, "dense")
         np.testing.assert_allclose(res.coeff, [1.0])
@@ -78,8 +79,19 @@ class EnVarWorkflowTest(unittest.TestCase):
         self.assertEqual(envar.solver.num_solves, 3)
         self.assertEqual(
             envar.solver.assembly_calls,
-            prob.model.num_steps,
+            res.num_forwards * prob.model.num_steps,
         )
+        self.assertTrue(
+            any(
+                event
+                == {
+                    "type": "stage",
+                    "message": "EnVar: forward solve at analysis",
+                }
+                for event in events
+            )
+        )
+        self.assertTrue(any(event["type"] == "solve" for event in events))
 
     def test_writes_complete_truth_trajectory(self):
         prob, _ = self.make_prob()

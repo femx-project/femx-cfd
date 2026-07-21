@@ -1,12 +1,14 @@
-"""Inverse-analysis case format version 1 validation and path resolution."""
+"""Inverse-analysis case validation, migration, and path resolution."""
 
 from copy import deepcopy
+import math
 from pathlib import Path
 from typing import Optional
 
 import yaml
 
 from femx_cfd._typing import Config, Dynamic, PathLike
+from femx_cfd.cases.migrations import migrate_inverse_case
 
 from .validation import (
     integer_multiple,
@@ -22,7 +24,7 @@ from .validation import (
 
 
 CASE_FORMAT = "femx-cfd-inverse"
-CASE_VERSION = 1
+CASE_VERSION = 2
 METHODS = {"var", "envar"}
 
 
@@ -38,13 +40,32 @@ def _positive_integer(value: Dynamic, name: str) -> int:
     return number
 
 
+def _nonnegative_integer(value: Dynamic, name: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a nonnegative integer")
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{name} must be a nonnegative integer") from error
+    if number < 0 or number != value:
+        raise ValueError(f"{name} must be a nonnegative integer")
+    return number
+
+
 def _validate_control(value: Dynamic) -> Config:
     control = mapping(value, "control")
     boundary = control.get("boundary")
     if not isinstance(boundary, str) or not boundary:
         raise ValueError("control.boundary must be a nonempty string")
-    if control.get("kind", "normal") != "normal":
-        raise ValueError("control.kind must be 'normal'")
+    kind = control.get("kind", "vector")
+    if kind not in ("vector", "normal"):
+        raise ValueError("control.kind must be 'vector' or 'normal'")
+    control["kind"] = kind
+    if kind == "vector":
+        if "normal" in control:
+            raise ValueError("control.normal is only valid for normal control")
+        return control
+
     normal = control.get("normal", "auto")
     if not isinstance(normal, str):
         try:
@@ -53,7 +74,6 @@ def _validate_control(value: Dynamic) -> Config:
             raise ValueError("control.normal must be 'auto' or a vector") from error
     elif normal != "auto":
         raise ValueError("control.normal must be 'auto' or a vector")
-    control["kind"] = "normal"
     control["normal"] = normal
     return control
 
@@ -79,6 +99,16 @@ def _validate_observations(value: Dynamic, base_dir: Optional[PathLike]) -> Conf
         "observations.path",
         base_dir,
     )
+    time_weights = observations.get("time_weights")
+    if time_weights is not None:
+        if not isinstance(time_weights, list) or not time_weights:
+            raise ValueError(
+                "observations.time_weights must be a nonempty list"
+            )
+        observations["time_weights"] = [
+            positive(weight, f"observations.time_weights[{index}]")
+            for index, weight in enumerate(time_weights)
+        ]
     return observations
 
 
@@ -127,7 +157,7 @@ def _validate_initialization(
     return initialization
 
 
-def _validate_var(value: Dynamic) -> Config:
+def _validate_var(value: Dynamic, control_kind: str) -> Config:
     algorithm = mapping(value, "algorithm")
     optimizer = algorithm.get("optimizer", "tao")
     if optimizer not in ("scipy", "tao"):
@@ -148,8 +178,18 @@ def _validate_var(value: Dynamic) -> Config:
     bounds = algorithm.get("control_bounds")
     if not isinstance(bounds, list) or len(bounds) != 2:
         raise ValueError("algorithm.control_bounds must contain two numbers")
-    lower = nonnegative(bounds[0], "algorithm.control_bounds[0]")
-    upper = positive(bounds[1], "algorithm.control_bounds[1]")
+    if control_kind == "normal":
+        lower = nonnegative(bounds[0], "algorithm.control_bounds[0]")
+        upper = positive(bounds[1], "algorithm.control_bounds[1]")
+    else:
+        try:
+            lower, upper = (float(bound) for bound in bounds)
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                "algorithm.control_bounds must contain two numbers"
+            ) from error
+        if not all(map(math.isfinite, (lower, upper))):
+            raise ValueError("algorithm.control_bounds must contain two finite numbers")
     if lower >= upper:
         raise ValueError("algorithm.control_bounds must be increasing")
     algorithm["control_bounds"] = [lower, upper]
@@ -166,23 +206,173 @@ def _validate_var(value: Dynamic) -> Config:
     return algorithm
 
 
+def _legacy_modes(scales: Config) -> Config:
+    """Translate the former fixed mode names into configurable definitions."""
+    definitions = {
+        "flow_mean": ("uniform", "mean"),
+        "flow_sin1": ("uniform", "sin1"),
+        "flow_cos1": ("uniform", "cos1"),
+        "flow_sin2": ("uniform", "sin2"),
+        "flow_cos2": ("uniform", "cos2"),
+        "skew_mean": ("skew", "mean"),
+        "skew_sin1": ("skew", "sin1"),
+        "skew_cos1": ("skew", "cos1"),
+        "shape_mean": ("peaking", "mean"),
+        "shape_cos2": ("peaking", "cos2"),
+    }
+    unknown = set(scales).difference(definitions)
+    if unknown:
+        names = ", ".join(sorted(unknown))
+        raise ValueError(f"ensemble.mode_scales contains unknown modes: {names}")
+
+    spatial = {"uniform": {"kind": "uniform"}}
+    temporal = {"mean": {"kind": "constant"}}
+    combined = []
+    for name, scale in scales.items():
+        spatial_name, temporal_name = definitions[name]
+        if spatial_name == "skew":
+            spatial[spatial_name] = {"kind": "surface_laplacian", "index": 1}
+        elif spatial_name == "peaking":
+            spatial[spatial_name] = {"kind": "surface_laplacian", "index": 0}
+        if temporal_name != "mean":
+            kind = "sine" if temporal_name.startswith("sin") else "cosine"
+            temporal[temporal_name] = {
+                "kind": kind,
+                "order": int(temporal_name[-1]),
+            }
+        combined.append(
+            {
+                "name": name,
+                "spatial": spatial_name,
+                "temporal": temporal_name,
+                "scale": scale,
+            }
+        )
+    return {"spatial": spatial, "temporal": temporal, "combined": combined}
+
+
+def _validate_ensemble_modes(value: Dynamic) -> Config:
+    modes = mapping(value, "ensemble.modes")
+    spatial = mapping(modes.get("spatial"), "ensemble.modes.spatial")
+    temporal = mapping(modes.get("temporal"), "ensemble.modes.temporal")
+    combined = modes.get("combined")
+    if not spatial:
+        raise ValueError("ensemble.modes.spatial must not be empty")
+    if not temporal:
+        raise ValueError("ensemble.modes.temporal must not be empty")
+    if not isinstance(combined, list) or not combined:
+        raise ValueError("ensemble.modes.combined must be a nonempty list")
+
+    for name, definition in spatial.items():
+        if not isinstance(name, str) or not name:
+            raise ValueError("ensemble.modes.spatial names must be nonempty strings")
+        definition = mapping(definition, f"ensemble.modes.spatial.{name}")
+        kind = definition.get("kind")
+        if kind == "uniform":
+            pass
+        elif kind == "surface_laplacian":
+            definition["index"] = _nonnegative_integer(
+                definition.get("index"),
+                f"ensemble.modes.spatial.{name}.index",
+            )
+        else:
+            raise ValueError(
+                f"ensemble.modes.spatial.{name}.kind must be 'uniform' or "
+                "'surface_laplacian'"
+            )
+        definition["kind"] = kind
+        spatial[name] = definition
+
+    for name, definition in temporal.items():
+        if not isinstance(name, str) or not name:
+            raise ValueError("ensemble.modes.temporal names must be nonempty strings")
+        definition = mapping(definition, f"ensemble.modes.temporal.{name}")
+        kind = definition.get("kind")
+        if kind == "constant":
+            pass
+        elif kind in ("sine", "cosine"):
+            definition["order"] = _positive_integer(
+                definition.get("order"),
+                f"ensemble.modes.temporal.{name}.order",
+            )
+            phase = definition.get("phase", 0.0)
+            try:
+                phase = float(phase)
+            except (TypeError, ValueError) as error:
+                raise ValueError(
+                    f"ensemble.modes.temporal.{name}.phase must be finite"
+                ) from error
+            if not math.isfinite(phase):
+                raise ValueError(f"ensemble.modes.temporal.{name}.phase must be finite")
+            definition["phase"] = phase
+        else:
+            raise ValueError(
+                f"ensemble.modes.temporal.{name}.kind must be 'constant', "
+                "'sine', or 'cosine'"
+            )
+        definition["kind"] = kind
+        temporal[name] = definition
+
+    names = set()
+    normalized = []
+    for index, definition in enumerate(combined):
+        prefix = f"ensemble.modes.combined[{index}]"
+        definition = mapping(definition, prefix)
+        name = definition.get("name")
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"{prefix}.name must be a nonempty string")
+        if name in names:
+            raise ValueError(f"ensemble.modes.combined names must be unique: {name}")
+        names.add(name)
+        spatial_name = definition.get("spatial")
+        temporal_name = definition.get("temporal")
+        if not isinstance(spatial_name, str) or spatial_name not in spatial:
+            raise ValueError(f"{prefix}.spatial must name a spatial mode")
+        if not isinstance(temporal_name, str) or temporal_name not in temporal:
+            raise ValueError(f"{prefix}.temporal must name a temporal mode")
+        normalized.append(
+            {
+                "name": name,
+                "spatial": spatial_name,
+                "temporal": temporal_name,
+                "scale": positive(definition.get("scale"), f"{prefix}.scale"),
+            }
+        )
+    return {"spatial": spatial, "temporal": temporal, "combined": normalized}
+
+
 def _validate_envar(value: Dynamic, ensemble_value: Dynamic) -> tuple[Config, Config]:
     algorithm = mapping(value, "algorithm")
     algorithm["prior_weight"] = nonnegative(
         algorithm.get("prior_weight", 1.0),
         "algorithm.prior_weight",
     )
+    algorithm["outer_iterations"] = _positive_integer(
+        algorithm.get("outer_iterations", 1),
+        "algorithm.outer_iterations",
+    )
     ensemble = mapping(ensemble_value, "ensemble")
     ensemble["workers"] = _positive_integer(
         ensemble.get("workers", 1),
         "ensemble.workers",
     )
-    scales = mapping(ensemble.get("mode_scales"), "ensemble.mode_scales")
-    if not scales:
-        raise ValueError("ensemble.mode_scales must not be empty")
-    for name, value in scales.items():
-        scales[name] = positive(value, f"ensemble.mode_scales.{name}")
-    ensemble["mode_scales"] = scales
+    save_initial_states = ensemble.get("save_initial_states", False)
+    if not isinstance(save_initial_states, bool):
+        raise ValueError("ensemble.save_initial_states must be a boolean")
+    ensemble["save_initial_states"] = save_initial_states
+    modes = ensemble.get("modes")
+    scales = ensemble.get("mode_scales")
+    if modes is not None and scales is not None:
+        raise ValueError("ensemble must specify either modes or mode_scales, not both")
+    if modes is None:
+        scales = mapping(scales, "ensemble.mode_scales")
+        if not scales:
+            raise ValueError("ensemble.mode_scales must not be empty")
+        for name, mode_scale in scales.items():
+            scales[name] = positive(mode_scale, f"ensemble.mode_scales.{name}")
+        ensemble["mode_scales"] = scales
+        modes = _legacy_modes(scales)
+    ensemble["modes"] = _validate_ensemble_modes(modes)
     return algorithm, ensemble
 
 
@@ -195,6 +385,7 @@ def validate_inverse_case(
     case = deepcopy(mapping(case, "case"))
     if case.get("format") != CASE_FORMAT:
         raise ValueError(f"case.format must be '{CASE_FORMAT}'")
+    case = migrate_inverse_case(case, base_dir)
     if case.get("version") != CASE_VERSION:
         raise ValueError(f"case.version must be {CASE_VERSION}")
     method = case.get("method")
@@ -220,7 +411,10 @@ def validate_inverse_case(
     )
     case["solver"] = validate_solver(case.get("solver"))
     if method == "var":
-        case["algorithm"] = _validate_var(case.get("algorithm"))
+        case["algorithm"] = _validate_var(
+            case.get("algorithm"),
+            case["control"]["kind"],
+        )
         case.pop("ensemble", None)
     else:
         case["algorithm"], case["ensemble"] = _validate_envar(

@@ -105,9 +105,12 @@ def _combined_mats(
 def _ctr_mats(prob: Dynamic) -> tuple[Dynamic, Dynamic]:
     surface = prob.model.mesh.boundary(prob.ctr.boundary)
     local = {int(node): idx for idx, node in enumerate(surface.mesh_node_ids)}
+    control_nodes = np.asarray(prob.ctr_mesh_node_ids, dtype=np.int64)
+    _, first = np.unique(control_nodes, return_index=True)
+    control_nodes = control_nodes[np.sort(first)]
     try:
         active = np.array(
-            [local[int(node)] for node in prob.ctr_mesh_node_ids],
+            [local[int(node)] for node in control_nodes],
             dtype=np.int64,
         )
     except KeyError as error:
@@ -116,10 +119,13 @@ def _ctr_mats(prob: Dynamic) -> tuple[Dynamic, Dynamic]:
         ) from error
 
     stiffness, mass, _ = surface.laplacian_matrices()
-    return (
-        stiffness[active][:, active].tocsr(),
-        mass[active][:, active].tocsr(),
-    )
+    stiffness = stiffness[active][:, active].tocsr()
+    mass = mass[active][:, active].tocsr()
+    if prob.ctr.kind == "vector":
+        components = sparse.eye(prob.model.mesh.dimension, format="csr")
+        stiffness = sparse.kron(stiffness, components, format="csr")
+        mass = sparse.kron(mass, components, format="csr")
+    return stiffness, mass
 
 
 def _compat_mat(prob: Dynamic, modes: np.ndarray) -> Dynamic:

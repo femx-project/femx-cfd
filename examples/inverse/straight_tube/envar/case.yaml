@@ -1,5 +1,5 @@
 format: femx-cfd-inverse
-version: 1
+version: 2
 method: envar
 
 mesh:
@@ -20,8 +20,7 @@ solver:
 
 control:
   boundary: inlet
-  kind: normal
-  normal: auto
+  kind: vector
 
 boundary_conditions:
 - boundary: wall
@@ -33,19 +32,35 @@ boundary_conditions:
 
 observations:
   kind: velocity
-  path: ../observations.h5
+  path: ../observation/velocity.h5
 
 initialization:
   inlet:
     source: file
-    path: ../initial_inlet.h5
+    path: ../inlet/initial_velocity.h5
 
 algorithm:
   prior_weight: 0.25
+  outer_iterations: 2
 
 ensemble:
   workers: 1
-
-  mode_scales:
-    flow_mean: 0.2
-    flow_sin1: 0.2
+  modes:
+    spatial:
+      uniform:
+        kind: uniform
+    temporal:
+      mean:
+        kind: constant
+      sin1:
+        kind: sine
+        order: 1
+    combined:
+    - name: flow_mean
+      spatial: uniform
+      temporal: mean
+      scale: 0.2
+    - name: flow_sin1
+      spatial: uniform
+      temporal: sin1
+      scale: 0.2

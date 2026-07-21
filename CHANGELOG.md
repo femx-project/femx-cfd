@@ -13,12 +13,31 @@
   configurable through a versioned YAML document.
 - Added an independently configurable, internally normalized synthetic truth
   direction; `auto` uses the inlet plane normal.
+- Added inverse case version 2 with all-component inlet velocity control for
+  Var and EnVar, while retaining optional normal-only control and version 1
+  migration.
+- Added configurable EnVar spatial, temporal, and combined inlet modes;
+  existing `mode_scales` settings remain supported.
+- Added configurable EnVar outer iterations that re-center the inlet ensemble,
+  rebuild spin-up initial-state modes, and rebuild the observation basis.
+- Added optional member-indexed XDMF output for EnVar initial-state ensembles.
+- Added relative per-time weights for inverse velocity observations.
+- Added selection of individual synthetic observation phases; a single phase
+  can initialize a constant periodic vector inlet estimate.
+- Made complete truth HDF5/XDMF and observation PVD/VTU visualization outputs
+  mandatory for every generated synthetic case.
 - Kept Var and EnVar analysis cases independent from synthetic-data recipes.
+- Added observation-phase flow and point-velocity visualizations for every
+  inverse result, alongside its complete estimated trajectory.
 
 ### Changed
 
 - Organized inverse examples as `var/case.yaml` and `envar/case.yaml`, with
   shared synthetic data in the parent case directory.
+- Organized synthetic and inverse artifacts by their roles: `reference`,
+  `observation`, `estimate`, and `inlet`. Inverse `result.h5` is now the sole
+  HDF5 container under `estimate/`; XDMF/PVD files are views of its fields and
+  predicted observations.
 
 ## v0.3.1
 

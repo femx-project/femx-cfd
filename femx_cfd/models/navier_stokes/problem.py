@@ -46,7 +46,7 @@ def make_problem(
     *,
     times: np.ndarray,
     periodic: bool,
-    normal: np.ndarray,
+    normal: Dynamic = None,
     init_state: Dynamic = None,
     init_mean: Dynamic = None,
     init_modes: Dynamic = None,
@@ -65,14 +65,23 @@ def make_problem(
     control = cfg["control"]
     add_bc(prob, cfg)
 
-    if control["kind"] != "normal":
-        raise ValueError("control.kind must be 'normal'")
-    ctr = femx.NormalVelocityControl(
-        control["boundary"],
-        normal=normal,
-        times=times,
-        periodic=periodic,
-    )
+    if control["kind"] == "vector":
+        ctr = femx.VelocityControl(
+            control["boundary"],
+            times=times,
+            periodic=periodic,
+        )
+    elif control["kind"] == "normal":
+        if normal is None:
+            raise ValueError("normal control requires an inlet normal")
+        ctr = femx.NormalVelocityControl(
+            control["boundary"],
+            normal=normal,
+            times=times,
+            periodic=periodic,
+        )
+    else:
+        raise ValueError("control.kind must be 'vector' or 'normal'")
     prob.add_ctr(ctr)
     if init_state is not None:
         prob.set_initial_state(init_state)
