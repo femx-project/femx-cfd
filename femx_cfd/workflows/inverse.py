@@ -39,6 +39,7 @@ class InverseSolution:
     initial_inlet: Dynamic
     initial_velocity: InletVelocityData
     predicted_velocity: VelocityData
+    initial_ensembles: tuple[Config, ...] = ()
 
 
 def _predicted_velocity(velocity: VelocityData, values: Dynamic) -> VelocityData:
@@ -144,7 +145,11 @@ def _solve_var(
         init_state=spin.values[-1],
         **prob_options,
     )
-    observation = make_velocity_obs(velocity, problem.model)
+    observation = make_velocity_obs(
+        velocity,
+        problem.model,
+        time_weights=case.get("observation_time_weights"),
+    )
 
     prog.stage("Var: optimizing the inlet velocity")
     options = case["var"]
@@ -205,6 +210,7 @@ def _solve_envar(
     prog.stage("input: loading prepared velocity observations")
     velocity = load_velocity(case["observations_path"])
     current_inlet = inlet
+    initial_ensembles = []
     outer_results = []
     total = options["outer_iterations"]
 
@@ -229,12 +235,30 @@ def _solve_envar(
             init_mean=spin.init_mean,
             init_modes=spin.init_modes,
         )
-        observation = make_velocity_obs(velocity, problem.model)
+        observation = make_velocity_obs(
+            velocity,
+            problem.model,
+            time_weights=case.get("observation_time_weights"),
+        )
         parameter_basis = ns.make_param_basis(
             problem,
             spin.ctr_mean,
             spin.ctr_modes,
         )
+        initial_ensemble = None
+        if case["ensemble"]["save_initial_states"]:
+            labels = ["mean"]
+            labels.extend(f"alpha_{name}" for name in spin.names)
+            initial_ensemble = {
+                "labels": tuple(labels),
+                "states": np.vstack(
+                    (
+                        spin.init_mean,
+                        spin.init_mean[None, :] + spin.init_modes.T,
+                    )
+                ),
+            }
+            initial_ensembles.append(initial_ensemble)
 
         stage("building the observation basis")
         observation_basis = ns.build_obs_basis(
@@ -259,6 +283,8 @@ def _solve_envar(
         )
         result = analysis.solve(prog=_outer_progress(prog, label))
         outer_results.append(result)
+        if initial_ensemble is not None:
+            initial_ensemble["analysis_state"] = result.traj.values[0].copy()
 
         if outer < total:
             begin = problem.ctr_param_offset
@@ -310,6 +336,7 @@ def _solve_envar(
         initial_inlet=inlet,
         initial_velocity=inlet_velocity,
         predicted_velocity=_predicted_velocity(velocity, result.pred),
+        initial_ensembles=tuple(initial_ensembles),
     )
 
 
@@ -329,6 +356,9 @@ def solve_inverse(case: Config, progress: Progress) -> InverseSolution:
         inlet, velocity = _initial_inlet(case, mesh)
         problem_case = _problem_case(case, mesh_path, mesh.dimension)
         problem_case["observations_path"] = case["observations"]["path"]
+        problem_case["observation_time_weights"] = case["observations"].get(
+            "time_weights"
+        )
         if case["method"] == "var":
             return _solve_var(problem_case, inlet, velocity, progress)
         return _solve_envar(problem_case, inlet, velocity, progress)

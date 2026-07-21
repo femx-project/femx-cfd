@@ -16,6 +16,7 @@ from .problem import make_problem
 
 @dataclass(frozen=True)
 class Spinup:
+    names: tuple[str, ...]
     init_mean: np.ndarray
     init_modes: np.ndarray
     ctr_mean: np.ndarray
@@ -364,6 +365,7 @@ def build_ensemble(
 
     init_mean = states[0].copy()
     return Spinup(
+        names=tuple(names),
         init_mean=init_mean,
         init_modes=_init_modes_from_states(prob, init_mean, states[1:]),
         ctr_mean=ctr_mean,

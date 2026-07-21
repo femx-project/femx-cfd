@@ -98,6 +98,22 @@ control bounds may be negative so tangential directions can have either sign.
 For vector EnVar, every configured inlet mode is expanded once per velocity
 component.
 
+Velocity observations have equal weight by default. To emphasize selected
+times, set one positive relative weight for every time level in the observation
+HDF5 file. For example, the first time contributes four times the squared-error
+weight of the other times here:
+
+```yaml
+observations:
+  kind: velocity
+  path: observation/velocity.h5
+  time_weights: [4.0, 1.0, 1.0]
+```
+
+Internally, relative weight `w` is represented by an observation standard
+deviation of `1 / sqrt(w)`. The list length is checked against the HDF5 time
+count when the workflow starts.
+
 Iterated EnVar re-centers the ensemble on the latest analysis and rebuilds the
 spin-up and observation bases with the same configured modes. One outer
 iteration preserves the single-linearization behavior:
@@ -111,6 +127,9 @@ algorithm:
 `outer_iterations` defaults to `1`. The prior penalizes the local coefficient
 increment in each outer iteration. Result HDF5 files retain the final
 `param`/`coeff` and add `param_history`/`coeff_history` across outer iterations.
+Set `ensemble.save_initial_states: true` to also write member-indexed XDMF
+views containing the spin-up mean, every coupled initial field, and the
+analysis.
 
 EnVar modes combine a spatial pattern with a periodic temporal pattern. Define
 the reusable patterns under `ensemble.modes`, then select only the combinations

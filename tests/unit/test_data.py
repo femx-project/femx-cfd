@@ -223,6 +223,36 @@ class VelocityDataTest(unittest.TestCase):
         np.testing.assert_array_equal(obs.values, velocity.vals.reshape(-1))
         np.testing.assert_array_equal(obs.std, np.ones(obs.op.num_obs))
 
+    def test_applies_relative_weights_per_observation_time(self):
+        velocity = self.make_velocity()
+        model = femx.NavierStokesModel(
+            MESH_FILE,
+            num_steps=2,
+            dt=0.5,
+            rho=1.0,
+            mu=0.01,
+        )
+
+        obs = make_velocity_obs(velocity, model, time_weights=[4.0, 1.0])
+
+        np.testing.assert_array_equal(
+            obs.std,
+            np.array([0.5] * 4 + [1.0] * 4),
+        )
+
+    def test_rejects_observation_time_weight_count_mismatch(self):
+        velocity = self.make_velocity()
+        model = femx.NavierStokesModel(
+            MESH_FILE,
+            num_steps=2,
+            dt=0.5,
+            rho=1.0,
+            mu=0.01,
+        )
+
+        with self.assertRaisesRegex(ValueError, "match.*time count"):
+            make_velocity_obs(velocity, model, time_weights=[1.0])
+
     def test_adds_reproducible_velocity_noise(self):
         velocity = self.make_velocity()
 

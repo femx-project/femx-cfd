@@ -99,6 +99,16 @@ def _validate_observations(value: Dynamic, base_dir: Optional[PathLike]) -> Conf
         "observations.path",
         base_dir,
     )
+    time_weights = observations.get("time_weights")
+    if time_weights is not None:
+        if not isinstance(time_weights, list) or not time_weights:
+            raise ValueError(
+                "observations.time_weights must be a nonempty list"
+            )
+        observations["time_weights"] = [
+            positive(weight, f"observations.time_weights[{index}]")
+            for index, weight in enumerate(time_weights)
+        ]
     return observations
 
 
@@ -346,6 +356,10 @@ def _validate_envar(value: Dynamic, ensemble_value: Dynamic) -> tuple[Config, Co
         ensemble.get("workers", 1),
         "ensemble.workers",
     )
+    save_initial_states = ensemble.get("save_initial_states", False)
+    if not isinstance(save_initial_states, bool):
+        raise ValueError("ensemble.save_initial_states must be a boolean")
+    ensemble["save_initial_states"] = save_initial_states
     modes = ensemble.get("modes")
     scales = ensemble.get("mode_scales")
     if modes is not None and scales is not None:

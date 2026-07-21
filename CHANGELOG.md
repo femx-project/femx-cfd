@@ -20,6 +20,8 @@
   existing `mode_scales` settings remain supported.
 - Added configurable EnVar outer iterations that re-center the inlet ensemble,
   rebuild spin-up initial-state modes, and rebuild the observation basis.
+- Added optional member-indexed XDMF output for EnVar initial-state ensembles.
+- Added relative per-time weights for inverse velocity observations.
 - Added selection of individual synthetic observation phases; a single phase
   can initialize a constant periodic vector inlet estimate.
 - Made complete truth HDF5/XDMF and observation PVD/VTU visualization outputs

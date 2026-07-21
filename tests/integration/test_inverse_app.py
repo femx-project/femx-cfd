@@ -5,6 +5,7 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 import h5py
+import numpy as np
 import pytest
 import yaml
 
@@ -87,6 +88,45 @@ def test_derives_initial_inlet_from_observations(tmp_path: Path) -> None:
         assert h5.attrs["format_version"] == 2
         assert "velocity" in h5["inlet"]
         assert "normal" not in h5["inlet"]
+
+
+def test_writes_envar_initial_ensemble_views(tmp_path: Path) -> None:
+    document = yaml.safe_load((EXAMPLE / "envar" / "case.yaml").read_text())
+    document["mesh"]["path"] = str(EXAMPLE / "mesh.msh")
+    document["observations"]["path"] = str(
+        EXAMPLE / "observation" / "velocity.h5"
+    )
+    document["initialization"]["inlet"]["path"] = str(
+        EXAMPLE / "inlet" / "initial_velocity.h5"
+    )
+    document["ensemble"]["save_initial_states"] = True
+    case_path = tmp_path / "envar-initial-ensemble.yaml"
+    case_path.write_text(yaml.safe_dump(document), encoding="utf-8")
+
+    output = run_case(case_path, tmp_path / "result", progress_kind="console")
+
+    manifest = json.loads((output / "result.json").read_text())
+    views = manifest["ensemble_initial_states"]
+    assert views == [
+        "estimate/ensemble_initial_outer_01.xdmf",
+        "estimate/ensemble_initial_outer_02.xdmf",
+    ]
+    with h5py.File(output / "estimate" / "result.h5") as result:
+        outer = result["EnsembleInitial/Outer000"]
+        labels = outer["labels"].asstr()[...].tolist()
+        assert labels[0] == "mean"
+        assert labels[-1] == "analysis"
+        assert len(labels) == 6
+        assert labels[1].startswith("alpha_")
+        assert not np.allclose(
+            outer["Member000/velocity"],
+            outer["Member001/velocity"],
+        )
+    names = [
+        grid.attrib["Name"]
+        for grid in ET.parse(output / views[0]).findall("./Domain/Grid/Grid")
+    ]
+    assert names == labels
 
 
 def test_runs_optional_normal_control(tmp_path: Path) -> None:

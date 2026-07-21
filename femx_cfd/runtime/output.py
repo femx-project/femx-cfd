@@ -132,6 +132,12 @@ def write_inverse_result(output: PathLike, solution: Dynamic) -> None:
         solution.trajectory,
         solution.metrics,
     )
+    ensemble_initial_states = write_initial_ensemble_views(
+        estimate / "result.h5",
+        estimate / "flow_window.xdmf",
+        solution.model,
+        solution.initial_ensembles,
+    )
     write_flow_samples(
         estimate / "result.h5",
         estimate / "flow_window.xdmf",
@@ -143,20 +149,22 @@ def write_inverse_result(output: PathLike, solution: Dynamic) -> None:
         estimate / "observation" / "velocity.pvd",
         solution.predicted_velocity,
     )
-    write_json(
-        output / "result.json",
-        {
-            "format": INVERSE_RESULT_FORMAT,
-            "version": OUTPUT_VERSION,
-            "method": solution.method,
-            "case": "case.yaml",
-            "flow_window": "estimate/flow_window.xdmf",
-            "flow_observation": "estimate/flow_observation.xdmf",
-            "data": "estimate/result.h5",
-            "observation": "estimate/observation/velocity.pvd",
-            "initial_inlet": "inlet/initial_velocity.h5",
-        },
-    )
+    manifest = {
+        "format": INVERSE_RESULT_FORMAT,
+        "version": OUTPUT_VERSION,
+        "method": solution.method,
+        "case": "case.yaml",
+        "flow_window": "estimate/flow_window.xdmf",
+        "flow_observation": "estimate/flow_observation.xdmf",
+        "data": "estimate/result.h5",
+        "observation": "estimate/observation/velocity.pvd",
+        "initial_inlet": "inlet/initial_velocity.h5",
+    }
+    if ensemble_initial_states:
+        manifest["ensemble_initial_states"] = [
+            str(path.relative_to(output)) for path in ensemble_initial_states
+        ]
+    write_json(output / "result.json", manifest)
     write_status(
         output,
         "complete",
@@ -249,6 +257,98 @@ def write_result(
             metrics,
             flow_name="flow_window.xdmf",
         )
+
+
+def write_initial_ensemble_views(
+    result_path: PathLike,
+    flow_xdmf: PathLike,
+    model: Dynamic,
+    ensembles: Dynamic,
+) -> list[Path]:
+    """Append initial ensemble velocities and write member-indexed XDMF views."""
+
+    if not ensembles:
+        return []
+
+    result_path = Path(result_path)
+    flow_xdmf = Path(flow_xdmf)
+    dimension = int(model.mesh.dimension)
+    num_nodes = int(model.mesh.num_nodes)
+    velocity_dofs = np.asarray(model.velocity_dofs, dtype=np.int64).reshape(
+        num_nodes,
+        dimension,
+    )
+
+    template_root = ET.parse(flow_xdmf).getroot()
+    template_collection = template_root.find("./Domain/Grid")
+    if template_collection is None or not list(template_collection):
+        raise ValueError("flow XDMF has no time levels")
+    template_grid = deepcopy(list(template_collection)[0])
+    outputs = []
+
+    with h5py.File(result_path, "a") as h5:
+        ensemble_group = h5.create_group("EnsembleInitial")
+        for outer_index, ensemble in enumerate(ensembles):
+            labels = list(ensemble["labels"])
+            states = np.asarray(ensemble["states"], dtype=float)
+            analysis_state = np.asarray(ensemble["analysis_state"], dtype=float)
+            labels.append("analysis")
+            states = np.vstack((states, analysis_state))
+            if states.shape != (len(labels), model.num_states):
+                raise ValueError("initial ensemble states do not match the model")
+
+            outer_name = f"Outer{outer_index:03d}"
+            outer_group = ensemble_group.create_group(outer_name)
+            outer_group.create_dataset(
+                "labels",
+                data=np.asarray(labels, dtype=h5py.string_dtype()),
+            )
+            for member_index, (label, state) in enumerate(zip(labels, states)):
+                member_name = f"Member{member_index:03d}"
+                member = outer_group.create_group(member_name)
+                member.attrs["label"] = label
+                velocity = np.zeros((num_nodes, 3))
+                velocity[:, :dimension] = state[velocity_dofs]
+                member.create_dataset("velocity", data=velocity, compression="gzip")
+
+            root = deepcopy(template_root)
+            collection = root.find("./Domain/Grid")
+            if collection is None:
+                raise ValueError("flow XDMF is missing its temporal collection")
+            collection.attrib["Name"] = f"initial_ensemble_outer_{outer_index + 1:02d}"
+            for grid in list(collection):
+                collection.remove(grid)
+            for member_index, label in enumerate(labels):
+                grid = deepcopy(template_grid)
+                grid.attrib["Name"] = label
+                time = grid.find("Time")
+                if time is None:
+                    raise ValueError("flow XDMF time level has no time")
+                time.attrib["Value"] = str(member_index)
+                for attribute in list(grid.findall("Attribute")):
+                    if attribute.attrib.get("Name") != "velocity":
+                        grid.remove(attribute)
+                velocity_item = grid.find("./Attribute[@Name='velocity']/DataItem")
+                if velocity_item is None:
+                    raise ValueError("flow XDMF has no velocity attribute")
+                velocity_item.text = (
+                    f"{result_path.name}:/EnsembleInitial/{outer_name}/"
+                    f"Member{member_index:03d}/velocity"
+                )
+                collection.append(grid)
+
+            xdmf_path = result_path.with_name(
+                f"ensemble_initial_outer_{outer_index + 1:02d}.xdmf"
+            )
+            ET.indent(root, space="  ")
+            with _atomic_path(xdmf_path) as temporary:
+                ET.ElementTree(root).write(
+                    temporary,
+                    encoding="utf-8",
+                    xml_declaration=True,
+                )
+            outputs.append(xdmf_path)
+    return outputs
 
 
 def write_truth(path: PathLike, model: Dynamic, traj: Dynamic) -> None:

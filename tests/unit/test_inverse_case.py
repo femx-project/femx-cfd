@@ -41,6 +41,8 @@ class InverseCaseTest(unittest.TestCase):
         modes = case.resolved["ensemble"]["modes"]
         self.assertEqual(modes["spatial"]["uniform"]["kind"], "uniform")
         self.assertEqual(modes["combined"][0]["name"], "flow_mean")
+        self.assertEqual(case.resolved["algorithm"]["prior_weight"], 0.25)
+        self.assertFalse(case.resolved["ensemble"]["save_initial_states"])
 
     def test_defaults_envar_to_one_outer_iteration(self):
         document = yaml.safe_load((EXAMPLE / "envar" / "case.yaml").read_text())
@@ -50,11 +52,33 @@ class InverseCaseTest(unittest.TestCase):
 
         self.assertEqual(case["algorithm"]["outer_iterations"], 1)
 
+    def test_rejects_nonboolean_ensemble_initial_state_output(self):
+        document = yaml.safe_load((EXAMPLE / "envar" / "case.yaml").read_text())
+        document["ensemble"]["save_initial_states"] = "yes"
+
+        with self.assertRaisesRegex(ValueError, "save_initial_states"):
+            validate_inverse_case(document, base_dir=EXAMPLE / "envar")
+
     def test_rejects_nonpositive_envar_outer_iterations(self):
         document = yaml.safe_load((EXAMPLE / "envar" / "case.yaml").read_text())
         document["algorithm"]["outer_iterations"] = 0
 
         with self.assertRaisesRegex(ValueError, "outer_iterations"):
+            validate_inverse_case(document, base_dir=EXAMPLE / "envar")
+
+    def test_accepts_relative_observation_time_weights(self):
+        document = yaml.safe_load((EXAMPLE / "envar" / "case.yaml").read_text())
+        document["observations"]["time_weights"] = [4.0, 1.0]
+
+        case = validate_inverse_case(document, base_dir=EXAMPLE / "envar")
+
+        self.assertEqual(case["observations"]["time_weights"], [4.0, 1.0])
+
+    def test_rejects_nonpositive_observation_time_weight(self):
+        document = yaml.safe_load((EXAMPLE / "envar" / "case.yaml").read_text())
+        document["observations"]["time_weights"] = [1.0, 0.0]
+
+        with self.assertRaisesRegex(ValueError, r"time_weights\[1\]"):
             validate_inverse_case(document, base_dir=EXAMPLE / "envar")
 
     def test_migrates_legacy_ensemble_mode_scales(self):

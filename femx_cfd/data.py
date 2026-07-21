@@ -353,8 +353,12 @@ def load_velocity(path: PathLike) -> VelocityData:
         )
 
 
-def make_velocity_obs(velocity: VelocityData, model: Dynamic) -> Dynamic:
-    """Create unit-weight observations from prepared velocity samples."""
+def make_velocity_obs(
+    velocity: VelocityData,
+    model: Dynamic,
+    time_weights: Dynamic = None,
+) -> Dynamic:
+    """Create observations with optional relative weights per time level."""
 
     components = np.arange(velocity.points.shape[1])
     op = femx.VelocityObservationOperator(
@@ -363,7 +367,21 @@ def make_velocity_obs(velocity: VelocityData, model: Dynamic) -> Dynamic:
         times=velocity.times,
         components=components,
     )
-    return femx.GaussianObservation(op, velocity.vals.reshape(-1), std=1.0)
+    std: Dynamic = 1.0
+    if time_weights is not None:
+        weights = np.asarray(time_weights, dtype=float)
+        if weights.shape != velocity.times.shape:
+            raise ValueError(
+                "observation time weights must match the velocity time count"
+            )
+        if not np.all(np.isfinite(weights)) or np.any(weights <= 0.0):
+            raise ValueError("observation time weights must be finite and positive")
+        time_std = 1.0 / np.sqrt(weights)
+        std = np.broadcast_to(
+            time_std[:, None, None],
+            velocity.vals.shape,
+        ).reshape(-1)
+    return femx.GaussianObservation(op, velocity.vals.reshape(-1), std=std)
 
 
 def add_velocity_noise(
