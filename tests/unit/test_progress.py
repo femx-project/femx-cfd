@@ -8,13 +8,12 @@ from femx_cfd.runtime.progress import (
     ConsoleProgress,
     JsonProgress,
     NullProgress,
-    console,
 )
 
 
 class ConsoleProgressTest(unittest.TestCase):
     def test_non_root_progress_is_a_noop(self):
-        prog = console(enabled=False)
+        prog = NullProgress()
 
         self.assertIsInstance(prog, NullProgress)
         with prog:

@@ -1,5 +1,9 @@
 format: femx-cfd-forward
-version: 2
+version: 3
+
+output:
+  directory: result
+  every: 1
 
 mesh:
   path: mesh.msh

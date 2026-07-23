@@ -10,10 +10,9 @@ import numpy as np
 
 import yaml
 
-from femx_cfd import (
+from femx_cfd.cases.forward import (
     CASE_FORMAT,
     CASE_VERSION,
-    load_forward_case,
     validate_forward_case,
 )
 from femx_cfd.cases import load_case
@@ -57,7 +56,7 @@ class ForwardCaseTest(unittest.TestCase):
 
         validated = validate_forward_case(case)
 
-        self.assertEqual(validated["version"], 2)
+        self.assertEqual(validated["version"], 3)
         self.assertEqual(
             validated["boundary_conditions"][0],
             {
@@ -88,14 +87,46 @@ class ForwardCaseTest(unittest.TestCase):
                 code = run_cli(["validate", str(case_path)])
 
         self.assertEqual(loaded.source_version, 1)
-        self.assertEqual(loaded.version, 2)
+        self.assertEqual(loaded.version, 3)
         self.assertEqual(code, 0)
         self.assertEqual(
             stdout.getvalue().strip(),
-            "valid: femx-cfd-forward version 1 (migrates to version 2)",
+            "valid: femx-cfd-forward version 1 (migrates to version 3)",
         )
 
-    def test_rejects_no_slip_in_version_2(self):
+    def test_inspects_output_and_flow_diagnostics_without_running(self):
+        case = make_case(MESH)
+        case["time"]["end_time"] = 0.5
+        case["output"] = {"directory": "runs/example", "every": 2}
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            case_path = directory / "case.yaml"
+            case_path.write_text(yaml.safe_dump(case), encoding="utf-8")
+            stdout = io.StringIO()
+
+            with contextlib.redirect_stdout(stdout):
+                code = run_cli(["inspect", str(case_path)])
+            self.assertFalse((directory / "runs/example").exists())
+
+            occupied = directory / "runs/example"
+            occupied.mkdir(parents=True)
+            (occupied / "status.json").write_text("{}\n", encoding="utf-8")
+            occupied_stdout = io.StringIO()
+            with contextlib.redirect_stdout(occupied_stdout):
+                occupied_code = run_cli(["inspect", str(case_path)])
+
+        report = stdout.getvalue()
+        self.assertEqual(code, 0)
+        self.assertIn(str(directory / "runs/example"), report)
+        self.assertIn("output every", report)
+        self.assertIn("output interval", report)
+        self.assertIn("output alignment", report)
+        self.assertIn("Reynolds estimate", report)
+        self.assertIn("inlet CFL estimate", report)
+        self.assertEqual(occupied_code, 1)
+        self.assertIn("occupied", occupied_stdout.getvalue())
+
+    def test_rejects_no_slip_in_current_version(self):
         case = make_case(MESH)
         case["boundary_conditions"][0] = {
             "boundary": "wall",
@@ -112,7 +143,7 @@ class ForwardCaseTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "2 or 3 finite values"):
             validate_forward_case(case)
 
-    def test_requires_explicit_pressure_value_in_version_2(self):
+    def test_requires_explicit_pressure_value(self):
         case = make_case(MESH)
         case["boundary_conditions"][1].pop("value")
 
@@ -129,7 +160,7 @@ class ForwardCaseTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            case = load_forward_case(case_path)
+            case = load_case(case_path).resolved
 
         self.assertEqual(
             case["mesh"],
@@ -160,7 +191,7 @@ class ForwardCaseTest(unittest.TestCase):
             case_path = directory / "case.yaml"
             case_path.write_text(yaml.safe_dump(document), encoding="utf-8")
 
-            case = load_forward_case(case_path)
+            case = load_case(case_path).resolved
 
         self.assertEqual(case["inlet"]["source"], "file")
         self.assertEqual(case["inlet"]["path"], str(inlet_path.resolve()))
@@ -170,6 +201,13 @@ class ForwardCaseTest(unittest.TestCase):
         case["inlet"]["source"] = "measurement"
 
         with self.assertRaisesRegex(ValueError, "analytic.*file"):
+            validate_forward_case(case)
+
+    def test_rejects_unknown_case_option(self):
+        case = make_case(MESH)
+        case["obsolete"] = True
+
+        with self.assertRaisesRegex(ValueError, "unknown options: obsolete"):
             validate_forward_case(case)
 
     def test_rejects_nonintegral_time_step_count(self):
@@ -193,6 +231,53 @@ class ForwardCaseTest(unittest.TestCase):
         validated = validate_forward_case(case)
 
         self.assertEqual(validated["mesh"]["length_unit"], "mm")
+
+    def test_resolves_version_3_output_relative_to_the_case(self):
+        case = make_case(MESH)
+        case["time"]["end_time"] = 1.25
+        case["output"] = {"directory": "runs/example", "every": 5}
+
+        validated = validate_forward_case(case, base_dir=MESH.parent)
+
+        self.assertEqual(
+            validated["output"],
+            {
+                "directory": str((MESH.parent / "runs/example").resolve()),
+                "every": 5,
+            },
+        )
+
+    def test_rejects_invalid_output_interval(self):
+        case = make_case(MESH)
+        case["output"] = {"every": 0}
+
+        with self.assertRaisesRegex(ValueError, "output.every"):
+            validate_forward_case(case)
+
+    def test_rejects_output_interval_that_does_not_divide_the_run(self):
+        case = make_case(MESH)
+        case["time"]["end_time"] = 0.75
+        case["output"] = {"every": 2}
+
+        with self.assertRaisesRegex(ValueError, "must divide"):
+            validate_forward_case(case)
+
+    def test_requires_version_3_for_output_configuration(self):
+        case = make_case(MESH)
+        case["version"] = 2
+        case["output"] = {"directory": "run"}
+
+        with self.assertRaisesRegex(ValueError, "requires case.version 3"):
+            validate_forward_case(case)
+
+    def test_migrates_version_2_to_default_output(self):
+        case = make_case(MESH)
+        case["version"] = 2
+
+        validated = validate_forward_case(case)
+
+        self.assertEqual(validated["version"], 3)
+        self.assertEqual(validated["output"], {"every": 1})
 
     def test_passes_named_options_to_the_selected_solver(self):
         case = make_case(MESH)

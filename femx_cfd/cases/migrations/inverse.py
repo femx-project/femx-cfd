@@ -1,12 +1,15 @@
 """Migrations for portable inverse-case documents."""
 
 from copy import deepcopy
-from typing import Optional
+from typing import Callable, Optional
 
 from femx_cfd._typing import Config, PathLike
 
 
-def migrate_v1_to_v2(
+_Migration = Callable[[Config, Optional[PathLike]], Config]
+
+
+def _migrate_v1_to_v2(
     case: Config,
     base_dir: Optional[PathLike] = None,
 ) -> Config:
@@ -21,6 +24,26 @@ def migrate_v1_to_v2(
     return migrated
 
 
+def _migrate_v2_to_v3(
+    case: Config,
+    base_dir: Optional[PathLike] = None,
+) -> Config:
+    """Adopt the output configuration while preserving earlier defaults."""
+
+    del base_dir
+    migrated = deepcopy(case)
+    if "output" in migrated:
+        raise ValueError("output requires case.version 3")
+    migrated["version"] = 3
+    return migrated
+
+
+_MIGRATIONS: dict[int, _Migration] = {
+    1: _migrate_v1_to_v2,
+    2: _migrate_v2_to_v3,
+}
+
+
 def migrate_inverse_case(
     case: Config,
     base_dir: Optional[PathLike] = None,
@@ -28,9 +51,17 @@ def migrate_inverse_case(
     """Migrate a supported inverse document to the current version."""
 
     migrated = deepcopy(case)
-    if migrated.get("version") == 1:
-        migrated = migrate_v1_to_v2(migrated, base_dir)
-    return migrated
+    while True:
+        version = migrated.get("version")
+        migration = _MIGRATIONS.get(version) if type(version) is int else None
+        if migration is None:
+            return migrated
+        previous = version
+        migrated = migration(migrated, base_dir)
+        if migrated.get("version") == previous:
+            raise RuntimeError(f"inverse case migration {previous} made no progress")
 
 
-__all__ = ["migrate_inverse_case", "migrate_v1_to_v2"]
+__all__ = [
+    "migrate_inverse_case",
+]

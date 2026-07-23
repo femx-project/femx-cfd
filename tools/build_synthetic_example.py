@@ -20,7 +20,7 @@ def main() -> None:
     parser.add_argument(
         "--output",
         type=Path,
-        default=root / "examples" / "inverse" / "straight_tube",
+        help="output directory (overrides output.directory)",
     )
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--progress", choices=("console", "json"), default="console")
@@ -32,6 +32,7 @@ def main() -> None:
             args.output,
             force=args.force,
             progress=progress,
+            finalize_runtime=True,
         )
 
 

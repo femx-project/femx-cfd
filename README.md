@@ -25,7 +25,7 @@ Install femx and femx-cfd:
 
 ```shell
 python -m pip install \
-  "femx @ git+https://github.com/femx-project/femx.git@v0.3.0"
+  "femx @ git+https://github.com/femx-project/femx.git@v0.4.0"
 python -m pip install -e .
 ```
 
@@ -52,11 +52,13 @@ Validate or run a case generated elsewhere:
 
 ```shell
 femx-cfd validate path/to/case.yaml
-femx-cfd run path/to/case.yaml --output path/to/result
+femx-cfd inspect path/to/case.yaml
+femx-cfd run path/to/case.yaml
 ```
 
+Cases can set their result directory and saved trajectory interval under
+`output`; `--output` overrides the configured directory when needed.
 Use `--progress json` for newline-delimited machine-readable progress.
-`femx-forward` remains available as a compatibility alias for forward cases.
 
 See [docs/cases.md](docs/cases.md) for the supported case families and output
 contract.

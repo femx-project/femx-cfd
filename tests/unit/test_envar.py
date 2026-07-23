@@ -107,6 +107,24 @@ class LinearEnVarTest(unittest.TestCase):
         self.assertAlmostEqual(res.obs_misfit, 2.5)
         self.assertAlmostEqual(res.prior, 2.5)
         self.assertAlmostEqual(res.obj, 5.0)
+        np.testing.assert_allclose(
+            res.coefficient_covariance,
+            0.5 * np.eye(2),
+        )
+
+    def test_coefficient_covariance_uses_observation_standard_deviation(self):
+        basis = femx.EnsembleBasis(np.zeros(2), np.eye(2))
+
+        res = _LinearProblem(
+            basis,
+            basis,
+            prior_weight=0.0,
+        ).solve(np.zeros(2), std=2.0)
+
+        np.testing.assert_allclose(
+            res.coefficient_covariance,
+            4.0 * np.eye(2),
+        )
 
     def test_avoids_squaring_observation_basis_condition_number(self):
         basis = femx.EnsembleBasis(np.zeros(2), np.eye(2))

@@ -26,6 +26,7 @@ FORWARD_RESULT_FORMAT = "femx-cfd-forward-result"
 INVERSE_STATUS_FORMAT = "femx-cfd-inverse-status"
 INVERSE_RESULT_FORMAT = "femx-cfd-inverse-result"
 OUTPUT_VERSION = 1
+INVERSE_RESULT_VERSION = 3
 
 
 @contextmanager
@@ -84,6 +85,25 @@ def write_status(
     )
 
 
+def result_directory_state(path: PathLike) -> str:
+    """Return whether a result directory is new, empty, or occupied."""
+
+    path = Path(path)
+    if not path.exists():
+        return "new"
+    if not path.is_dir() or any(path.iterdir()):
+        return "occupied"
+    return "empty"
+
+
+def require_available_result_directory(path: PathLike) -> None:
+    """Reject a file or nonempty directory before a run starts."""
+
+    path = Path(path)
+    if result_directory_state(path) == "occupied":
+        raise FileExistsError(f"result directory is not empty: {path}")
+
+
 def prepare_run(
     output: PathLike,
     case: Config,
@@ -93,19 +113,131 @@ def prepare_run(
     """Create an empty result directory and snapshot its source case."""
 
     output = Path(output)
-    if output.exists() and any(output.iterdir()):
-        raise FileExistsError(f"result directory is not empty: {output}")
+    require_available_result_directory(output)
     output.mkdir(parents=True, exist_ok=True)
     write_case(output / "case.yaml", case)
     write_status(output, "running", status_format=status_format)
     return output
 
 
-def write_forward_result(output: PathLike, solution: Dynamic) -> None:
-    """Write a forward trajectory and its backward-compatible manifest."""
+def trajectory_levels(
+    num_steps: int,
+    every: int,
+) -> np.ndarray:
+    """Select uniformly spaced persisted solver levels."""
+
+    if isinstance(every, bool) or not isinstance(every, int) or every <= 0:
+        raise ValueError("output.every must be a positive integer")
+    if num_steps < 0:
+        raise ValueError("trajectory step count must be nonnegative")
+    if num_steps % every != 0:
+        raise ValueError(
+            f"output.every ({every}) must divide the {num_steps} integration steps"
+        )
+    return np.arange(0, num_steps + 1, every, dtype=int)
+
+
+def _copy_trajectory_levels(
+    source_xdmf: PathLike,
+    target_xdmf: PathLike,
+    levels: np.ndarray,
+) -> None:
+    """Copy selected flow levels into a compact HDF5/XDMF time series."""
+
+    source_xdmf = Path(source_xdmf).with_suffix(".xdmf")
+    target_xdmf = Path(target_xdmf).with_suffix(".xdmf")
+    source_h5 = source_xdmf.with_suffix(".h5")
+    target_h5 = target_xdmf.with_suffix(".h5")
+    levels = np.asarray(levels, dtype=int)
+
+    root = ET.parse(source_xdmf).getroot()
+    collection = root.find("./Domain/Grid")
+    if collection is None:
+        raise ValueError("flow XDMF is missing its temporal collection")
+    source_grids = list(collection)
+    if (
+        levels.ndim != 1
+        or levels.size == 0
+        or np.any(np.diff(levels) <= 0)
+        or levels[0] < 0
+        or levels[-1] >= len(source_grids)
+    ):
+        raise ValueError("output levels are incompatible with the trajectory")
+
+    with h5py.File(source_h5, "r") as input_h5:
+        with _atomic_path(target_h5) as temporary:
+            with h5py.File(temporary, "w") as output_h5:
+                mesh = output_h5.create_group("mesh")
+                input_h5.copy("Mesh/Geometry", mesh, name="geometry")
+                input_h5.copy("Mesh/Topology", mesh, name="topology")
+                data = output_h5.create_group("data")
+                for target_level, source_level in enumerate(levels):
+                    source_name = source_grids[int(source_level)].attrib["Name"]
+                    input_h5.copy(
+                        f"Data/{source_name}",
+                        data,
+                        name=f"step_{target_level:06d}",
+                    )
+
+    for grid in source_grids:
+        collection.remove(grid)
+    for target_level, source_level in enumerate(levels):
+        grid = deepcopy(source_grids[int(source_level)])
+        source_name = grid.attrib["Name"]
+        target_name = f"step_{target_level:06d}"
+        grid.attrib["Name"] = target_name
+        for item in grid.iter("DataItem"):
+            if item.text:
+                item.text = item.text.replace(
+                    f"{source_h5.name}:",
+                    f"{target_h5.name}:",
+                )
+                item.text = item.text.replace(
+                    "/Mesh/Geometry",
+                    "/mesh/geometry",
+                )
+                item.text = item.text.replace(
+                    "/Mesh/Topology",
+                    "/mesh/topology",
+                )
+                item.text = item.text.replace(
+                    f"/Data/{source_name}/",
+                    f"/data/{target_name}/",
+                )
+        collection.append(grid)
+    ET.indent(root, space="  ")
+    with _atomic_path(target_xdmf) as temporary:
+        ET.ElementTree(root).write(temporary, encoding="utf-8", xml_declaration=True)
+
+
+def _write_trajectory(
+    path: PathLike,
+    model: Dynamic,
+    trajectory: Dynamic,
+    levels: np.ndarray,
+) -> None:
+    with tempfile.TemporaryDirectory(prefix="femx-cfd-flow-") as tmp_dir:
+        source = Path(tmp_dir) / "flow.xdmf"
+        model.write_xdmf(source, trajectory)
+        _copy_trajectory_levels(source, Path(path).with_suffix(".xdmf"), levels)
+
+
+def write_forward_result(
+    output: PathLike,
+    solution: Dynamic,
+    *,
+    every: int = 1,
+) -> None:
+    """Write a forward trajectory and its result manifest."""
 
     output = Path(output)
-    write_truth(output / "flow.h5", solution.model, solution.trajectory)
+    levels = trajectory_levels(solution.trajectory.num_steps, every)
+    _write_trajectory(
+        output / "flow.xdmf",
+        solution.model,
+        solution.trajectory,
+        levels,
+    )
     write_json(
         output / "result.json",
         {
@@ -119,9 +251,17 @@ def write_forward_result(output: PathLike, solution: Dynamic) -> None:
     write_status(output, "complete", result="result.json")
 
 
-def write_inverse_result(output: PathLike, solution: Dynamic) -> None:
+def write_inverse_result(
+    output: PathLike,
+    solution: Dynamic,
+    *,
+    every: int = 1,
+    ensemble_basis: str = "final",
+) -> None:
     """Write inverse analysis data, flow trajectory, and its manifest."""
 
+    if ensemble_basis not in ("final", "all"):
+        raise ValueError("ensemble_basis must be 'final' or 'all'")
     output = Path(output)
     estimate = output / "estimate"
     write_result(
@@ -131,19 +271,20 @@ def write_inverse_result(output: PathLike, solution: Dynamic) -> None:
         solution.values,
         solution.trajectory,
         solution.metrics,
+        every=every,
+        required_times=solution.predicted_velocity.times,
     )
-    ensemble_initial_states = write_initial_ensemble_views(
+    bases = tuple(solution.ensemble_bases)
+    first_outer_index = 0
+    if ensemble_basis == "final" and bases:
+        first_outer_index = len(bases) - 1
+        bases = bases[-1:]
+    ensemble_basis_views = write_ensemble_bases(
         estimate / "result.h5",
         estimate / "flow_window.xdmf",
         solution.model,
-        solution.initial_ensembles,
-    )
-    write_flow_samples(
-        estimate / "result.h5",
-        estimate / "flow_window.xdmf",
-        estimate / "flow_observation.xdmf",
-        solution.predicted_velocity.times,
-        solution.model.dt,
+        bases,
+        first_outer_index=first_outer_index,
     )
     write_velocity_series(
         estimate / "observation" / "velocity.pvd",
@@ -151,7 +292,7 @@ def write_inverse_result(output: PathLike, solution: Dynamic) -> None:
     )
     manifest = {
         "format": INVERSE_RESULT_FORMAT,
-        "version": OUTPUT_VERSION,
+        "version": INVERSE_RESULT_VERSION,
         "method": solution.method,
         "case": "case.yaml",
         "flow_window": "estimate/flow_window.xdmf",
@@ -160,9 +301,9 @@ def write_inverse_result(output: PathLike, solution: Dynamic) -> None:
         "observation": "estimate/observation/velocity.pvd",
         "initial_inlet": "inlet/initial_velocity.h5",
     }
-    if ensemble_initial_states:
-        manifest["ensemble_initial_states"] = [
-            str(path.relative_to(output)) for path in ensemble_initial_states
+    if ensemble_basis_views:
+        manifest["ensemble_basis"] = [
+            str(path.relative_to(output)) for path in ensemble_basis_views
         ]
     write_json(output / "result.json", manifest)
     write_status(
@@ -177,15 +318,20 @@ def _save_result(
     path: PathLike,
     method: str,
     vals: Config,
-    traj: Dynamic,
+    levels: np.ndarray,
+    dt: float,
 ) -> None:
     with h5py.File(path, "w") as h5:
         h5.attrs["format"] = "femx-cfd"
-        h5.attrs["format_version"] = 1
+        h5.attrs["format_version"] = INVERSE_RESULT_VERSION
         h5.attrs["kind"] = f"{method}_result"
+        estimate = h5.create_group("estimate")
         for name, val in vals.items():
-            h5.create_dataset(name, data=val)
-        h5.create_dataset("states", data=traj.values, compression="gzip")
+            if name == "coefficient_names":
+                val = np.asarray(val, dtype=h5py.string_dtype())
+            estimate.create_dataset(name, data=val)
+        estimate.create_dataset("state_levels", data=levels)
+        estimate.create_dataset("state_times", data=levels * dt)
 
 
 def _save_metrics(group: h5py.Group, metrics: Config) -> None:
@@ -223,16 +369,53 @@ def bundle_result(
     with _atomic_path(result_file) as tmp:
         shutil.copyfile(src_result, tmp)
         with h5py.File(tmp, "a") as result, h5py.File(heavy_file) as flow:
-            flow.copy("Mesh", result)
-            flow.copy("Data", result)
+            flow.copy("mesh", result)
+            estimate = result.require_group("estimate")
+            flow.copy("data", estimate, name="fields")
             if metrics:
-                _save_metrics(result.create_group("metrics"), metrics)
+                _save_metrics(estimate.create_group("metrics"), metrics)
 
     with _atomic_path(flow_file) as tmp:
         tmp.write_text(
-            xdmf.replace(f"{heavy_name}:", f"{data_name}:"),
+            xdmf.replace(f"{heavy_name}:", f"{data_name}:").replace(
+                "/data/", "/estimate/fields/"
+            ),
             encoding="utf-8",
         )
+
+
+def _bundle_sampled_flow(
+    source_h5: PathLike,
+    source_xdmf: PathLike,
+    result_h5: PathLike,
+    target_xdmf: PathLike,
+) -> None:
+    """Append independently sampled flow fields to an inverse result."""
+
+    source_h5 = Path(source_h5).with_suffix(".h5")
+    source_xdmf = Path(source_xdmf).with_suffix(".xdmf")
+    result_h5 = Path(result_h5).with_suffix(".h5")
+    target_xdmf = Path(target_xdmf).with_suffix(".xdmf")
+    with h5py.File(result_h5, "a") as result, h5py.File(source_h5) as samples:
+        estimate = result.require_group("estimate")
+        if "observation_fields" in estimate:
+            raise FileExistsError(f"observation flow already exists: {result_h5}")
+        samples.copy("data", estimate, name="observation_fields")
+
+    root = ET.parse(source_xdmf).getroot()
+    for item in root.iter("DataItem"):
+        if item.text:
+            item.text = item.text.replace(
+                f"{source_h5.name}:",
+                f"{result_h5.name}:",
+            )
+            item.text = item.text.replace(
+                "/data/",
+                "/estimate/observation_fields/",
+            )
+    ET.indent(root, space="  ")
+    with _atomic_path(target_xdmf) as temporary:
+        ET.ElementTree(root).write(temporary, encoding="utf-8", xml_declaration=True)
 
 
 def write_result(
@@ -242,14 +425,28 @@ def write_result(
     vals: Config,
     traj: Dynamic,
     metrics: Config,
+    *,
+    every: int = 1,
+    required_times: Optional[np.ndarray] = None,
 ) -> None:
-    """Write one inverse result and its complete flow time series."""
+    """Write one inverse result and its selected flow time series."""
+    levels = trajectory_levels(traj.num_steps, every)
     with tempfile.TemporaryDirectory(prefix="femx-cfd-result-") as tmp_dir:
         tmp_dir = Path(tmp_dir)
         result_file = tmp_dir / "result.h5"
+        complete_flow = tmp_dir / "complete.xdmf"
         flow_file = tmp_dir / "flow.xdmf"
-        _save_result(result_file, method, vals, traj)
-        model.write_xdmf(flow_file, traj)
+        observation_file = tmp_dir / "observation.h5"
+        _save_result(result_file, method, vals, levels, model.dt)
+        model.write_xdmf(complete_flow, traj)
+        if required_times is not None:
+            write_truth_samples(
+                complete_flow,
+                observation_file,
+                required_times,
+                model.dt,
+            )
+        _copy_trajectory_levels(complete_flow, flow_file, levels)
         bundle_result(
             result_file,
             flow_file,
@@ -257,104 +454,331 @@ def write_result(
             metrics,
             flow_name="flow_window.xdmf",
         )
+        if required_times is not None:
+            _bundle_sampled_flow(
+                observation_file,
+                observation_file.with_suffix(".xdmf"),
+                Path(out) / "result.h5",
+                Path(out) / "flow_observation.xdmf",
+            )
 
 
-def write_initial_ensemble_views(
-    result_path: PathLike,
-    flow_xdmf: PathLike,
+def _state_fields(
     model: Dynamic,
-    ensembles: Dynamic,
-) -> list[Path]:
-    """Append initial ensemble velocities and write member-indexed XDMF views."""
+    states: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Convert state vectors to node-indexed velocity and pressure fields."""
 
-    if not ensembles:
-        return []
-
-    result_path = Path(result_path)
-    flow_xdmf = Path(flow_xdmf)
+    states = np.asarray(states, dtype=float)
+    if states.ndim != 2 or states.shape[1] != model.num_states:
+        raise ValueError("ensemble basis states do not match the model")
     dimension = int(model.mesh.dimension)
     num_nodes = int(model.mesh.num_nodes)
     velocity_dofs = np.asarray(model.velocity_dofs, dtype=np.int64).reshape(
         num_nodes,
         dimension,
     )
+    velocity = np.zeros((states.shape[0], num_nodes, 3))
+    velocity[..., :dimension] = states[:, velocity_dofs]
 
-    template_root = ET.parse(flow_xdmf).getroot()
-    template_collection = template_root.find("./Domain/Grid")
-    if template_collection is None or not list(template_collection):
-        raise ValueError("flow XDMF has no time levels")
-    template_grid = deepcopy(list(template_collection)[0])
+    pressure_mask = np.ones(model.num_states, dtype=bool)
+    pressure_mask[velocity_dofs.reshape(-1)] = False
+    pressure_dofs = np.flatnonzero(pressure_mask)
+    if pressure_dofs.size != num_nodes:
+        raise ValueError("model pressure degrees of freedom do not match the mesh")
+    pressure = states[:, pressure_dofs]
+    return velocity, pressure
+
+
+def _write_basis_fields(
+    group: h5py.Group,
+    model: Dynamic,
+    states: np.ndarray,
+) -> None:
+    velocity, pressure = _state_fields(model, states)
+    fields = group.create_group("fields")
+    fields.create_dataset("velocity", data=velocity, compression="gzip")
+    fields.create_dataset("pressure", data=pressure, compression="gzip")
+
+
+def _xdmf_hyperslab(
+    dataset: str,
+    index: int,
+    full_shape: tuple[int, ...],
+) -> ET.Element:
+    selected_shape = full_shape[1:]
+    dimensions = " ".join(str(size) for size in selected_shape)
+    item = ET.Element(
+        "DataItem",
+        ItemType="HyperSlab",
+        Dimensions=dimensions,
+        Type="HyperSlab",
+    )
+    rank = len(full_shape)
+    selector = ET.SubElement(
+        item,
+        "DataItem",
+        Dimensions=f"3 {rank}",
+        Format="XML",
+    )
+    start = [index, *(0 for _ in selected_shape)]
+    stride = [1] * rank
+    count = [1, *selected_shape]
+    selector.text = (
+        "\n"
+        + "\n".join(
+            " ".join(str(value) for value in row) for row in (start, stride, count)
+        )
+        + "\n"
+    )
+    source = ET.SubElement(
+        item,
+        "DataItem",
+        Dimensions=" ".join(str(size) for size in full_shape),
+        NumberType="Float",
+        Precision="8",
+        Format="HDF",
+    )
+    source.text = dataset
+    return item
+
+
+def _append_basis_attribute(
+    grid: ET.Element,
+    *,
+    name: str,
+    attribute_type: str,
+    reference: str,
+    perturbation: Optional[str],
+    index: int,
+    full_shape: tuple[int, ...],
+) -> None:
+    attribute = ET.SubElement(
+        grid,
+        "Attribute",
+        Name=name,
+        AttributeType=attribute_type,
+        Center="Node",
+    )
+    reference_item = _xdmf_hyperslab(reference, index, full_shape)
+    if perturbation is None:
+        attribute.append(reference_item)
+        return
+    dimensions = " ".join(str(size) for size in full_shape[1:])
+    function = ET.SubElement(
+        attribute,
+        "DataItem",
+        ItemType="Function",
+        Function="$0 + $1",
+        Dimensions=dimensions,
+    )
+    function.append(reference_item)
+    function.append(_xdmf_hyperslab(perturbation, index, full_shape))
+
+
+def _basis_member_grid(
+    template: ET.Element,
+    *,
+    name: str,
+    reference_root: str,
+    perturbation_root: Optional[str],
+    time_index: int,
+    num_times: int,
+    num_nodes: int,
+) -> ET.Element:
+    grid = deepcopy(template)
+    grid.attrib["Name"] = name
+    time = grid.find("Time")
+    if time is not None:
+        grid.remove(time)
+    for attribute in list(grid.findall("Attribute")):
+        grid.remove(attribute)
+
+    velocity_shape = (num_times, num_nodes, 3)
+    pressure_shape = (num_times, num_nodes)
+    _append_basis_attribute(
+        grid,
+        name="velocity",
+        attribute_type="Vector",
+        reference=f"{reference_root}/velocity",
+        perturbation=(
+            None if perturbation_root is None else f"{perturbation_root}/velocity"
+        ),
+        index=time_index,
+        full_shape=velocity_shape,
+    )
+    _append_basis_attribute(
+        grid,
+        name="pressure",
+        attribute_type="Scalar",
+        reference=f"{reference_root}/pressure",
+        perturbation=(
+            None if perturbation_root is None else f"{perturbation_root}/pressure"
+        ),
+        index=time_index,
+        full_shape=pressure_shape,
+    )
+    if perturbation_root is not None:
+        _append_basis_attribute(
+            grid,
+            name="velocity_perturbation",
+            attribute_type="Vector",
+            reference=f"{perturbation_root}/velocity",
+            perturbation=None,
+            index=time_index,
+            full_shape=velocity_shape,
+        )
+        _append_basis_attribute(
+            grid,
+            name="pressure_perturbation",
+            attribute_type="Scalar",
+            reference=f"{perturbation_root}/pressure",
+            perturbation=None,
+            index=time_index,
+            full_shape=pressure_shape,
+        )
+    return grid
+
+
+def _write_ensemble_basis_view(
+    path: Path,
+    result_path: Path,
+    flow_xdmf: Path,
+    outer_name: str,
+    coefficient_names: tuple[str, ...],
+    state_times: np.ndarray,
+    num_nodes: int,
+) -> None:
+    root = ET.parse(flow_xdmf).getroot()
+    collection = root.find("./Domain/Grid")
+    if collection is None:
+        raise ValueError("flow XDMF is missing its temporal collection")
+    source_grids = list(collection)
+    if len(source_grids) != state_times.size:
+        raise ValueError("ensemble basis and flow output times do not match")
+    source_times = []
+    for grid in source_grids:
+        time = grid.find("Time")
+        if time is None:
+            raise ValueError("flow XDMF time level has no time")
+        source_times.append(float(time.attrib["Value"]))
+    if not np.allclose(source_times, state_times, rtol=0.0, atol=1.0e-10):
+        raise ValueError("ensemble basis and flow output times do not match")
+
+    collection.attrib["Name"] = outer_name
+    for grid in source_grids:
+        collection.remove(grid)
+    result_name = result_path.name
+    basis_root = f"{result_name}:/ensemble_basis/{outer_name}"
+    reference_root = f"{basis_root}/reference/fields"
+    for time_index, (time_value, template) in enumerate(zip(state_times, source_grids)):
+        step = ET.Element(
+            "Grid",
+            Name=f"step_{time_index:06d}",
+            GridType="Collection",
+            CollectionType="Spatial",
+        )
+        ET.SubElement(step, "Time", Value=f"{float(time_value):.17g}")
+        step.append(
+            _basis_member_grid(
+                template,
+                name="reference",
+                reference_root=reference_root,
+                perturbation_root=None,
+                time_index=time_index,
+                num_times=state_times.size,
+                num_nodes=num_nodes,
+            )
+        )
+        for mode_index, coefficient_name in enumerate(coefficient_names):
+            perturbation_root = (
+                f"{basis_root}/perturbations/mode_{mode_index:03d}/fields"
+            )
+            step.append(
+                _basis_member_grid(
+                    template,
+                    name=coefficient_name,
+                    reference_root=reference_root,
+                    perturbation_root=perturbation_root,
+                    time_index=time_index,
+                    num_times=state_times.size,
+                    num_nodes=num_nodes,
+                )
+            )
+        collection.append(step)
+
+    ET.indent(root, space="  ")
+    with _atomic_path(path) as temporary:
+        ET.ElementTree(root).write(
+            temporary,
+            encoding="utf-8",
+            xml_declaration=True,
+        )
+
+
+def write_ensemble_bases(
+    result_path: PathLike,
+    flow_xdmf: PathLike,
+    model: Dynamic,
+    bases: Dynamic,
+    *,
+    first_outer_index: int = 0,
+) -> list[Path]:
+    """Append full EnVar trajectory bases and write reconstructing XDMF views."""
+
+    if not bases:
+        return []
+    if (
+        isinstance(first_outer_index, bool)
+        or not isinstance(first_outer_index, int)
+        or first_outer_index < 0
+    ):
+        raise ValueError("first_outer_index must be a nonnegative integer")
+    result_path = Path(result_path)
+    flow_xdmf = Path(flow_xdmf)
     outputs = []
-
     with h5py.File(result_path, "a") as h5:
-        ensemble_group = h5.create_group("EnsembleInitial")
-        for outer_index, ensemble in enumerate(ensembles):
-            labels = list(ensemble["labels"])
-            states = np.asarray(ensemble["states"], dtype=float)
-            analysis_state = np.asarray(ensemble["analysis_state"], dtype=float)
-            labels.append("analysis")
-            states = np.vstack((states, analysis_state))
-            if states.shape != (len(labels), model.num_states):
-                raise ValueError("initial ensemble states do not match the model")
-
-            outer_name = f"Outer{outer_index:03d}"
-            outer_group = ensemble_group.create_group(outer_name)
-            outer_group.create_dataset(
-                "labels",
-                data=np.asarray(labels, dtype=h5py.string_dtype()),
+        ensemble_group = h5.create_group("ensemble_basis")
+        for outer_index, basis in enumerate(bases, start=first_outer_index):
+            outer_name = f"outer_{outer_index:03d}"
+            outer = ensemble_group.create_group(outer_name)
+            names = tuple(basis.coefficient_names)
+            levels = np.asarray(basis.state_levels, dtype=np.int64)
+            times = np.asarray(basis.state_times, dtype=float)
+            reference = np.asarray(basis.reference, dtype=float)
+            perturbations = np.asarray(basis.perturbations, dtype=float)
+            if perturbations.shape != (
+                len(names),
+                reference.shape[0],
+                reference.shape[1],
+            ):
+                raise ValueError("ensemble basis perturbations have invalid shape")
+            if levels.shape != times.shape or levels.size != reference.shape[0]:
+                raise ValueError("ensemble basis output levels have invalid shape")
+            outer.create_dataset(
+                "coefficient_names",
+                data=np.asarray(names, dtype=h5py.string_dtype()),
             )
-            for member_index, (label, state) in enumerate(zip(labels, states)):
-                member_name = f"Member{member_index:03d}"
-                member = outer_group.create_group(member_name)
-                member.attrs["label"] = label
-                velocity = np.zeros((num_nodes, 3))
-                velocity[:, :dimension] = state[velocity_dofs]
-                member.create_dataset("velocity", data=velocity, compression="gzip")
+            outer.create_dataset("state_levels", data=levels)
+            outer.create_dataset("state_times", data=times)
+            _write_basis_fields(outer.create_group("reference"), model, reference)
+            perturbation_group = outer.create_group("perturbations")
+            for mode_index, states in enumerate(perturbations):
+                mode = perturbation_group.create_group(f"mode_{mode_index:03d}")
+                _write_basis_fields(mode, model, states)
 
-            root = deepcopy(template_root)
-            collection = root.find("./Domain/Grid")
-            if collection is None:
-                raise ValueError("flow XDMF is missing its temporal collection")
-            collection.attrib["Name"] = f"initial_ensemble_outer_{outer_index + 1:02d}"
-            for grid in list(collection):
-                collection.remove(grid)
-            for member_index, label in enumerate(labels):
-                grid = deepcopy(template_grid)
-                grid.attrib["Name"] = label
-                time = grid.find("Time")
-                if time is None:
-                    raise ValueError("flow XDMF time level has no time")
-                time.attrib["Value"] = str(member_index)
-                for attribute in list(grid.findall("Attribute")):
-                    if attribute.attrib.get("Name") != "velocity":
-                        grid.remove(attribute)
-                velocity_item = grid.find("./Attribute[@Name='velocity']/DataItem")
-                if velocity_item is None:
-                    raise ValueError("flow XDMF has no velocity attribute")
-                velocity_item.text = (
-                    f"{result_path.name}:/EnsembleInitial/{outer_name}/"
-                    f"Member{member_index:03d}/velocity"
-                )
-                collection.append(grid)
-
-            xdmf_path = result_path.with_name(
-                f"ensemble_initial_outer_{outer_index + 1:02d}.xdmf"
+            view = result_path.with_name(f"ensemble_basis_{outer_name}.xdmf")
+            _write_ensemble_basis_view(
+                view,
+                result_path,
+                flow_xdmf,
+                outer_name,
+                names,
+                times,
+                int(model.mesh.num_nodes),
             )
-            ET.indent(root, space="  ")
-            with _atomic_path(xdmf_path) as temporary:
-                ET.ElementTree(root).write(
-                    temporary,
-                    encoding="utf-8",
-                    xml_declaration=True,
-                )
-            outputs.append(xdmf_path)
+            outputs.append(view)
     return outputs
-
-
-def write_truth(path: PathLike, model: Dynamic, traj: Dynamic) -> None:
-    """Write the complete synthetic truth trajectory as HDF5/XDMF."""
-
-    model.write_xdmf(Path(path).with_suffix(".xdmf"), traj)
 
 
 def write_truth_samples(
@@ -399,15 +823,17 @@ def write_truth_samples(
 
         with _atomic_path(path) as temporary:
             with h5py.File(temporary, "w") as output_h5:
-                input_h5.copy("Mesh", output_h5)
-                data = output_h5.create_group("Data")
+                mesh = output_h5.create_group("mesh")
+                input_h5.copy("Mesh/Geometry", mesh, name="geometry")
+                input_h5.copy("Mesh/Topology", mesh, name="topology")
+                data = output_h5.create_group("data")
                 for sample, position in enumerate(positions):
                     lower = int(np.floor(position))
                     upper = min(lower + 1, source_steps - 1)
                     weight = position - lower
                     before = input_h5[f"Data/Step{lower:05d}"]
                     after = input_h5[f"Data/Step{upper:05d}"]
-                    step = data.create_group(f"Step{sample:05d}")
+                    step = data.create_group(f"step_{sample:06d}")
                     for field in before:
                         values = (1.0 - weight) * before[field][...] + weight * after[
                             field
@@ -426,7 +852,7 @@ def write_truth_samples(
     for sample, time in enumerate(times):
         grid = deepcopy(template)
         old_name = grid.attrib["Name"]
-        new_name = f"Step{sample:05d}"
+        new_name = f"step_{sample:06d}"
         grid.attrib["Name"] = new_name
         time_element = grid.find("Time")
         if time_element is None:
@@ -436,97 +862,20 @@ def write_truth_samples(
             if item.text:
                 item.text = item.text.replace(f"{source.name}:", f"{path.name}:")
                 item.text = item.text.replace(
-                    f"/Data/{old_name}/", f"/Data/{new_name}/"
+                    "/Mesh/Geometry",
+                    "/mesh/geometry",
+                )
+                item.text = item.text.replace(
+                    "/Mesh/Topology",
+                    "/mesh/topology",
+                )
+                item.text = item.text.replace(
+                    f"/Data/{old_name}/", f"/data/{new_name}/"
                 )
         collection.append(grid)
     ET.indent(root, space="  ")
     with _atomic_path(target_xdmf) as temporary:
         ET.ElementTree(root).write(temporary, encoding="utf-8", xml_declaration=True)
-
-
-def write_flow_samples(
-    source: PathLike,
-    source_xdmf: PathLike,
-    path: PathLike,
-    times: np.ndarray,
-    dt: float,
-) -> Path:
-    """Write an XDMF view of one flow at selected times.
-
-    Exact solver levels are referenced directly, so no field data is copied.
-    Times that fall between levels are interpolated into ``SampleData`` within
-    the existing result HDF5 file.
-    """
-
-    source = Path(source).with_suffix(".h5")
-    source_xdmf = Path(source_xdmf).with_suffix(".xdmf")
-    path = Path(path).with_suffix(".xdmf")
-    times = np.asarray(times, dtype=float)
-    if times.ndim != 1 or times.size == 0 or np.any(np.diff(times) <= 0.0):
-        raise ValueError("flow sample times must be increasing and nonempty")
-    if not np.isfinite(dt) or dt <= 0.0:
-        raise ValueError("flow sample dt must be positive")
-
-    root = ET.parse(source_xdmf).getroot()
-    collection = root.find("./Domain/Grid")
-    if collection is None:
-        raise ValueError("flow XDMF is missing its temporal collection")
-    source_grids = list(collection)
-    if not source_grids:
-        raise ValueError("flow XDMF has no time levels")
-
-    with h5py.File(source, "a") as h5:
-        source_steps = len(h5["Data"])
-        positions = times / dt
-        if positions[0] < -1.0e-10 or positions[-1] > source_steps - 1 + 1.0e-10:
-            raise ValueError("flow sample times are outside the trajectory")
-        positions = np.clip(positions, 0.0, source_steps - 1)
-        exact = np.isclose(positions, np.rint(positions), rtol=0.0, atol=1.0e-10)
-        if "SampleData" in h5:
-            del h5["SampleData"]
-        samples = h5.create_group("SampleData") if not np.all(exact) else None
-        source_names = []
-        target_names = []
-        for sample, position in enumerate(positions):
-            lower = int(np.floor(position))
-            if exact[sample]:
-                source_names.append(f"Step{lower:05d}")
-                target_names.append(f"Data/Step{lower:05d}")
-                continue
-            upper = min(lower + 1, source_steps - 1)
-            weight = position - lower
-            before = h5[f"Data/Step{lower:05d}"]
-            after = h5[f"Data/Step{upper:05d}"]
-            name = f"Step{sample:05d}"
-            step = samples.create_group(name)
-            for field in before:
-                values = (1.0 - weight) * before[field][...] + weight * after[field][
-                    ...
-                ]
-                step.create_dataset(field, data=values)
-            source_names.append(f"Step{lower:05d}")
-            target_names.append(f"SampleData/{name}")
-
-    for grid in source_grids:
-        collection.remove(grid)
-    for time, source_name, target_name in zip(times, source_names, target_names):
-        grid = deepcopy(source_grids[int(source_name.removeprefix("Step"))])
-        grid.attrib["Name"] = target_name.rsplit("/", maxsplit=1)[-1]
-        time_element = grid.find("Time")
-        if time_element is None:
-            raise ValueError("flow XDMF time level has no time")
-        time_element.attrib["Value"] = f"{time:.17g}"
-        for item in grid.iter("DataItem"):
-            if item.text:
-                item.text = item.text.replace(
-                    f"/Data/{source_name}/",
-                    f"/{target_name}/",
-                )
-        collection.append(grid)
-    ET.indent(root, space="  ")
-    with _atomic_path(path) as temporary:
-        ET.ElementTree(root).write(temporary, encoding="utf-8", xml_declaration=True)
-    return path
 
 
 def _vtk_binary(values: np.ndarray, dtype: Dynamic) -> str:
@@ -670,13 +1019,3 @@ def write_velocity_series(path: PathLike, velocity: VelocityData) -> Path:
         )
 
     return pvd_file
-
-
-def write_observations(path: PathLike, velocity: VelocityData) -> Path:
-    """Write observation visualizations beside their HDF5 data."""
-    heavy_file = Path(path)
-    with h5py.File(heavy_file, "a") as h5:
-        expected_shape = velocity.vals.shape
-        if h5["velocity/values"].shape != expected_shape:
-            raise ValueError("velocity HDF5 data has an incompatible shape")
-    return write_velocity_series(heavy_file.with_suffix(".pvd"), velocity)

@@ -4,14 +4,15 @@ import json
 import shutil
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import h5py
 import numpy as np
 import yaml
 
-from femx_cfd.cli import run_forward_cli as run_cli
-from femx_cfd import CASE_FORMAT, CASE_VERSION
+from femx_cfd.cli import run_cli
+from femx_cfd.cases.forward import CASE_FORMAT, CASE_VERSION
 from femx_cfd.data import InletVelocityData, save_inlet
 
 
@@ -53,16 +54,16 @@ class ForwardApplicationTest(unittest.TestCase):
             stdout = io.StringIO()
 
             with contextlib.redirect_stdout(stdout):
-                code = run_cli([str(case_path), "--progress", "json"])
+                code = run_cli(["run", str(case_path), "--progress", "json"])
 
             output = directory / "result"
             self.assertEqual(code, 0)
             self.assertTrue((output / "flow.h5").is_file())
             self.assertTrue((output / "flow.xdmf").is_file())
             with h5py.File(output / "flow.h5", "r") as h5:
-                self.assertEqual(len(h5["Data"]), 2)
+                self.assertEqual(len(h5["data"]), 2)
                 self.assertAlmostEqual(
-                    float(abs(h5["Mesh/Geometry"][...]).max()),
+                    float(abs(h5["mesh/geometry"][...]).max()),
                     1.0e-3,
                 )
 
@@ -75,6 +76,55 @@ class ForwardApplicationTest(unittest.TestCase):
             self.assertEqual(events[0]["type"], "stage")
             self.assertEqual(events[-1]["type"], "stage")
             self.assertIn("complete", events[-1]["message"])
+
+    def test_uses_configured_output_and_writes_every_n_steps(self):
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            shutil.copyfile(MESH, directory / "mesh.msh")
+            case = {
+                "format": CASE_FORMAT,
+                "version": CASE_VERSION,
+                "output": {"directory": "runs/thinned", "every": 2},
+                "mesh": {"path": "mesh.msh", "length_unit": "mm"},
+                "fluid": {"rho": 1.0, "mu": 0.01},
+                "time": {"dt": 0.25, "end_time": 1.0},
+                "inlet": {
+                    "boundary": "inlet",
+                    "normal": "auto",
+                    "profile": {"kind": "uniform", "value": 0.1},
+                },
+                "boundary_conditions": [
+                    {
+                        "boundary": "wall",
+                        "kind": "velocity",
+                        "value": [0.0, 0.0],
+                    },
+                    {
+                        "boundary": "outlet",
+                        "kind": "pressure",
+                        "value": 0.0,
+                    },
+                ],
+                "solver": {"backend": "dense"},
+            }
+            case_path = directory / "case.yaml"
+            case_path.write_text(yaml.safe_dump(case), encoding="utf-8")
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = run_cli(["run", str(case_path)])
+
+            output = directory / "runs/thinned"
+            self.assertEqual(code, 0)
+            with h5py.File(output / "flow.h5") as h5:
+                self.assertEqual(
+                    list(h5["data"]),
+                    ["step_000000", "step_000001", "step_000002"],
+                )
+            times = [
+                float(item.attrib["Value"])
+                for item in ET.parse(output / "flow.xdmf").iter("Time")
+            ]
+            np.testing.assert_allclose(times, [0.0, 0.5, 1.0])
 
     def test_runs_with_prepared_inlet_hdf5(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -121,7 +171,7 @@ class ForwardApplicationTest(unittest.TestCase):
             case_path.write_text(yaml.safe_dump(case), encoding="utf-8")
 
             with contextlib.redirect_stdout(io.StringIO()):
-                code = run_cli([str(case_path)])
+                code = run_cli(["run", str(case_path)])
 
             self.assertEqual(code, 0)
             self.assertTrue((directory / "result" / "flow.h5").is_file())
@@ -170,7 +220,7 @@ class ForwardApplicationTest(unittest.TestCase):
             status.write_text('{"state": "complete"}\n')
 
             with contextlib.redirect_stderr(io.StringIO()):
-                code = run_cli([str(case_path)])
+                code = run_cli(["run", str(case_path)])
 
             self.assertEqual(code, 1)
             self.assertEqual(status.read_text(), '{"state": "complete"}\n')

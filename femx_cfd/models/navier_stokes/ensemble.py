@@ -23,6 +23,17 @@ class Spinup:
     ctr_modes: np.ndarray
 
 
+@dataclass(frozen=True)
+class TrajectoryBasis:
+    """Saved reference trajectory and state perturbations for one outer loop."""
+
+    coefficient_names: tuple[str, ...]
+    state_levels: np.ndarray
+    state_times: np.ndarray
+    reference: np.ndarray
+    perturbations: np.ndarray
+
+
 def _surface_mode(prob: Dynamic, index: int) -> np.ndarray:
     """Return a normalized Dirichlet surface mode on active control nodes."""
     surface = prob.model.mesh.boundary(prob.ctr.boundary)
@@ -91,6 +102,8 @@ def _analytic_ctr_modes(
             profile.reshape(profile.shape[0], -1, dimension),
             axis=2,
         )
+    if cfg["ensemble"].get("profile_scaling", "instantaneous") == "peak":
+        profile = np.max(np.abs(profile), axis=0, keepdims=True)
     modes_cfg = cfg["ensemble"]["modes"]
     spatial_cfg = modes_cfg["spatial"]
     temporal_cfg = modes_cfg["temporal"]
@@ -379,8 +392,9 @@ def _obs_prediction(
     spin: Spinup,
     velocity: Dynamic,
     params: np.ndarray,
+    capture_states: bool,
     progress: OptionalProgress = None,
-) -> np.ndarray:
+) -> Dynamic:
     prob = make_problem(
         cfg,
         times=inlet.times,
@@ -392,7 +406,15 @@ def _obs_prediction(
     obs = make_velocity_obs(velocity, prob.model)
     solver = prob.create_solver(cfg["solver"]["backend"])
     traj = solver.solve(params, progress=progress)
-    return obs.op.predict(traj)
+    prediction = obs.op.predict(traj)
+    if not capture_states:
+        return prediction
+    every = int(cfg["output"]["every"])
+    if traj.num_steps % every:
+        raise ValueError("output.every must divide the ensemble trajectory steps")
+    levels = np.arange(0, traj.num_steps + 1, every, dtype=np.int64)
+    states = np.ascontiguousarray(traj.values[levels])
+    return prediction, levels, states
 
 
 def build_obs_basis(
@@ -403,6 +425,8 @@ def build_obs_basis(
     param_basis: Dynamic,
     report: ReportCallback = lambda _message: None,
     progress: OptionalProgress = None,
+    *,
+    capture_states: bool = False,
 ) -> Dynamic:
     """Build the EnVar observation basis with parallel forward solves."""
 
@@ -413,8 +437,8 @@ def build_obs_basis(
 
     labels = ["observation mean"]
     labels.extend(f"observation member {idx + 1}" for idx in range(modes.shape[1]))
-    args = [(cfg, inlet, spin, velocity, param) for param in params]
-    predictions = _parallel_map(
+    args = [(cfg, inlet, spin, velocity, param, capture_states) for param in params]
+    results = _parallel_map(
         _obs_prediction,
         args,
         labels,
@@ -424,9 +448,37 @@ def build_obs_basis(
         progress=progress,
     )
 
+    if capture_states:
+        predictions = [result[0] for result in results]
+        levels = np.asarray(results[0][1], dtype=np.int64)
+        states = [np.asarray(result[2], dtype=float) for result in results]
+        for result, member_states in zip(results[1:], states[1:]):
+            if not np.array_equal(result[1], levels):
+                raise RuntimeError("ensemble members used inconsistent output levels")
+            if member_states.shape != states[0].shape:
+                raise RuntimeError(
+                    "ensemble member trajectories have inconsistent shapes"
+                )
+    else:
+        predictions = results
+
     mean_pred = predictions[0]
     obs_modes = np.column_stack([pred - mean_pred for pred in predictions[1:]])
-    return femx.EnsembleBasis(mean_pred, obs_modes)
+    observation_basis = femx.EnsembleBasis(mean_pred, obs_modes)
+    if not capture_states:
+        return observation_basis
+
+    reference = states[0].copy()
+    perturbations = np.stack(
+        [member - reference for member in states[1:]],
+    )
+    return observation_basis, TrajectoryBasis(
+        coefficient_names=spin.names,
+        state_levels=levels,
+        state_times=levels * float(cfg["time"]["dt"]),
+        reference=reference,
+        perturbations=perturbations,
+    )
 
 
 def make_param_basis(

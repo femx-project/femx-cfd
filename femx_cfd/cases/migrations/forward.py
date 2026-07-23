@@ -9,7 +9,7 @@ import femx
 from femx_cfd._typing import Config, PathLike
 
 
-Migration = Callable[[Config, Optional[PathLike]], Config]
+_Migration = Callable[[Config, Optional[PathLike]], Config]
 
 
 def _mesh_dimension(case: Config, base_dir: Optional[PathLike]) -> int:
@@ -28,7 +28,7 @@ def _mesh_dimension(case: Config, base_dir: Optional[PathLike]) -> int:
     return int(femx.Mesh.read(path).dimension)
 
 
-def migrate_v1_to_v2(
+def _migrate_v1_to_v2(
     case: Config,
     base_dir: Optional[PathLike] = None,
 ) -> Config:
@@ -53,7 +53,24 @@ def migrate_v1_to_v2(
     return migrated
 
 
-MIGRATIONS: dict[int, Migration] = {1: migrate_v1_to_v2}
+def _migrate_v2_to_v3(
+    case: Config,
+    base_dir: Optional[PathLike] = None,
+) -> Config:
+    """Adopt the output configuration while preserving earlier defaults."""
+
+    del base_dir
+    migrated = deepcopy(case)
+    if "output" in migrated:
+        raise ValueError("output requires case.version 3")
+    migrated["version"] = 3
+    return migrated
+
+
+_MIGRATIONS: dict[int, _Migration] = {
+    1: _migrate_v1_to_v2,
+    2: _migrate_v2_to_v3,
+}
 
 
 def migrate_forward_case(
@@ -65,7 +82,7 @@ def migrate_forward_case(
     migrated = deepcopy(case)
     while True:
         version = migrated.get("version")
-        migration = MIGRATIONS.get(version) if type(version) is int else None
+        migration = _MIGRATIONS.get(version) if type(version) is int else None
         if migration is None:
             return migrated
         previous = version
@@ -74,4 +91,6 @@ def migrate_forward_case(
             raise RuntimeError(f"forward case migration {previous} made no progress")
 
 
-__all__ = ["MIGRATIONS", "migrate_forward_case", "migrate_v1_to_v2"]
+__all__ = [
+    "migrate_forward_case",
+]

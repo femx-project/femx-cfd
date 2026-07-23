@@ -402,7 +402,7 @@ def add_velocity_noise(
 
 
 def save_inlet(path: PathLike, inlet: Dynamic) -> None:
-    """Save inlet vector velocity, expanding a legacy normal control if needed."""
+    """Save inlet vector velocity, expanding a normal control if needed."""
 
     if isinstance(inlet, InletData):
         inlet = InletVelocityData(
@@ -429,7 +429,7 @@ def save_inlet(path: PathLike, inlet: Dynamic) -> None:
 
 
 def load_inlet(path: PathLike) -> InletVelocityData:
-    """Load inlet vector velocity, upgrading legacy normal-only data."""
+    """Load inlet vector velocity, upgrading version 1 normal-only data."""
 
     with h5py.File(_path(path), "r") as h5:
         version = _check_header(

@@ -13,7 +13,8 @@ from typing import Optional, Sequence
 
 import yaml
 
-from femx_cfd.cases import FORWARD_FORMAT, load_case
+from femx_cfd.cases import load_case
+from femx_cfd.runtime.inspection import inspect_case
 from femx_cfd.runtime.runner import run_case
 
 
@@ -22,7 +23,7 @@ def _run_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "-o",
         "--output",
-        help="result directory relative to the current directory (default: result beside the case file)",
+        help="result directory relative to the current directory (overrides output.directory)",
     )
     parser.add_argument(
         "--progress",
@@ -46,6 +47,13 @@ def _parser() -> argparse.ArgumentParser:
     _run_arguments(commands.add_parser("run", help="run one case"))
     validate = commands.add_parser("validate", help="validate one case")
     validate.add_argument("case", help="path to a portable case YAML file")
+    inspect = commands.add_parser("inspect", help="inspect one case without running it")
+    inspect.add_argument("case", help="path to a portable case YAML file")
+    inspect.add_argument(
+        "-o",
+        "--output",
+        help="override the configured result directory for this inspection",
+    )
     example = commands.add_parser("example", help="run a bundled example case")
     example.add_argument("kind", choices=tuple(_example_cases()))
     example.add_argument("-o", "--output")
@@ -55,15 +63,6 @@ def _parser() -> argparse.ArgumentParser:
         default="console",
     )
     example.add_argument("--debug", action="store_true")
-    return parser
-
-
-def _forward_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="femx-forward",
-        description="Run one femx-cfd forward-simulation case.",
-    )
-    _run_arguments(parser)
     return parser
 
 
@@ -106,25 +105,10 @@ def _report_error(error: Exception, progress_kind: str, debug: bool) -> None:
 
 def _execute_run(
     args: argparse.Namespace,
-    expected_format: str | None = None,
-    expected_method: str | None = None,
 ) -> int:
     try:
-        loaded = load_case(args.case)
-        if expected_format is not None and loaded.format != expected_format:
-            raise ValueError(
-                f"expected case format '{expected_format}', got '{loaded.format}'"
-            )
-        if (
-            expected_method is not None
-            and loaded.resolved.get("method") != expected_method
-        ):
-            raise ValueError(
-                f"expected inverse method '{expected_method}', "
-                f"got '{loaded.resolved.get('method')}'"
-            )
         run_case(
-            loaded.path,
+            args.case,
             args.output,
             progress_kind=args.progress,
             finalize_runtime=True,
@@ -150,6 +134,44 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> int:
             message += f" (migrates to version {case.version})"
         print(message)
         return 0
+    if args.command == "inspect":
+        try:
+            report = inspect_case(args.case, args.output)
+        except Exception as error:
+            print(f"error: {error}", file=sys.stderr)
+            return 1
+        version = str(report["source_version"])
+        if report["source_version"] != report["version"]:
+            version += f" -> {report['version']}"
+        rows = (
+            ("case", report["case"]),
+            ("format", report["format"]),
+            ("version", version),
+            ("method", report["method"]),
+            (
+                "mesh",
+                f"{report['mesh_nodes']} nodes, {report['mesh_elements']} elements",
+            ),
+            ("steps", report["steps"]),
+            ("output", report["output_directory"]),
+            ("output state", report["output_state"]),
+            ("output every", report["output_every"]),
+            ("output interval", f"{report['output_interval']:.6g} s"),
+            ("output alignment", "exact"),
+            ("output levels", report["output_levels"]),
+            ("peak inlet speed", f"{report['peak_inlet_speed']:.6g} m/s"),
+            (
+                "inlet length",
+                f"{report['inlet_characteristic_length']:.6g} m",
+            ),
+            ("inlet min edge", f"{report['inlet_min_edge']:.6g} m"),
+            ("Reynolds estimate", f"{report['reynolds']:.6g}"),
+            ("inlet CFL estimate", f"{report['cfl']:.6g}"),
+        )
+        width = max(len(label) for label, _ in rows)
+        for label, value in rows:
+            print(f"{label:<{width}}  {value}")
+        return 1 if report["output_state"] == "occupied" else 0
     if args.command == "example":
         args.case = str(_example_cases()[args.kind])
         if args.output is None:
@@ -158,52 +180,13 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> int:
     return _execute_run(args)
 
 
-def run_forward_cli(argv: Optional[Sequence[str]] = None) -> int:
-    """Run the backward-compatible femx-forward command."""
-
-    args = _forward_parser().parse_args(argv)
-    return _execute_run(args, FORWARD_FORMAT)
-
-
-def run_inverse_cli(
-    method: str,
-    argv: Optional[Sequence[str]] = None,
-) -> int:
-    """Run a method-specific compatibility command for an inverse case."""
-
-    parser = argparse.ArgumentParser(
-        prog=f"femx-{method}",
-        description=f"Run one femx-cfd {method} inverse case.",
-    )
-    _run_arguments(parser)
-    args = parser.parse_args(argv)
-    return _execute_run(args, "femx-cfd-inverse", method)
-
-
 def main() -> None:
     raise SystemExit(run_cli())
 
 
-def forward_main() -> None:
-    raise SystemExit(run_forward_cli())
-
-
-def var_main() -> None:
-    raise SystemExit(run_inverse_cli("var"))
-
-
-def envar_main() -> None:
-    raise SystemExit(run_inverse_cli("envar"))
-
-
 __all__ = [
-    "envar_main",
-    "forward_main",
     "main",
     "run_cli",
-    "run_forward_cli",
-    "run_inverse_cli",
-    "var_main",
 ]
 
 

@@ -1,5 +1,9 @@
 format: femx-cfd-synthetic
-version: 1
+version: 2
+
+output:
+  directory: .
+  every: 1
 
 mesh:
   kind: straight_tube
@@ -16,7 +20,9 @@ time:
   dt: 0.25
   truth_cycles: 2
 
-truth:
+boundary_conditions:
+- boundary: inlet
+  kind: velocity
   direction: auto
   profile:
     kind: poisson
@@ -29,8 +35,15 @@ truth:
     - kind: sin
       order: 1
       amplitude: 0.3
-  solver:
-    backend: dense
+- boundary: wall
+  kind: velocity
+  value: [0.0, 0.0]
+- boundary: outlet
+  kind: pressure
+  value: 0.0
+
+solver:
+  backend: dense
 
 observations:
   lower: [-1.75, -0.4]
@@ -38,6 +51,8 @@ observations:
   counts: [8, 5]
   phases: 4
   noise:
+    # Specify either an absolute component-wise std or a linear snr. For snr,
+    # reference may be rms (default) or max.
     std: 0.0
     seed: 42
 

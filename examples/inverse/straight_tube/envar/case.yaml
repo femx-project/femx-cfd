@@ -1,9 +1,13 @@
 format: femx-cfd-inverse
-version: 2
+version: 3
 method: envar
 
+output:
+  directory: result
+  every: 1
+
 mesh:
-  path: ../mesh.msh
+  path: ../mesh/mesh.msh
   length_unit: m
 
 fluid:
