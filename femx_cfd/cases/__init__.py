@@ -65,17 +65,17 @@ def load_case(path: PathLike) -> LoadedCase:
     )
 
 
-def validate_case(path: PathLike) -> LoadedCase:
-    """Validate a case file and return its loaded representation."""
-
-    return load_case(path)
-
-
 def snapshot_case(case: LoadedCase, directory: PathLike) -> Config:
     """Return an auditable case snapshot with paths valid from a result."""
 
     document = deepcopy(case.document)
     target = Path(directory).expanduser().resolve()
+    if case.source_version >= 3:
+        output = document.setdefault("output", {})
+        output["directory"] = "."
+        output["every"] = case.resolved["output"]["every"]
+        if case.format == INVERSE_FORMAT and case.resolved["method"] == "envar":
+            output["ensemble_basis"] = case.resolved["output"]["ensemble_basis"]
     if case.format == FORWARD_FORMAT:
         mesh = Path(case.resolved["mesh"]["path"])
         relative = os.path.relpath(mesh, target)
@@ -114,5 +114,4 @@ __all__ = [
     "LoadedCase",
     "load_case",
     "snapshot_case",
-    "validate_case",
 ]

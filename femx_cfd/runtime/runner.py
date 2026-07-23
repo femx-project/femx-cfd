@@ -2,7 +2,7 @@
 
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from femx_cfd._typing import PathLike, Progress
 from femx_cfd.cases import (
@@ -19,13 +19,21 @@ from femx_cfd.workflows.inverse import solve_inverse
 from . import output, parallel, progress
 
 
-def result_path(case_path: PathLike, value: Optional[PathLike] = None) -> Path:
-    """Resolve the default beside its case and explicit paths from the CWD."""
+def result_path(
+    case: Union[LoadedCase, PathLike],
+    value: Optional[PathLike] = None,
+) -> Path:
+    """Resolve CLI, configured, and default result directories."""
 
-    case_path = Path(case_path).expanduser().resolve()
-    if value is None:
-        return case_path.parent / "result"
-    return Path(value).expanduser().resolve()
+    case_path = case.path if isinstance(case, LoadedCase) else Path(case)
+    case_path = case_path.expanduser().resolve()
+    if value is not None:
+        return Path(value).expanduser().resolve()
+    if isinstance(case, LoadedCase):
+        configured = case.resolved["output"].get("directory")
+        if configured is not None:
+            return Path(configured)
+    return case_path.parent / "result"
 
 
 def _progress_sink(kind: str, enabled: bool) -> Progress:
@@ -49,7 +57,11 @@ def _run_forward(
     runtime.barrier()
     if runtime.is_root:
         prog.stage("output: writing flow.h5 and flow.xdmf")
-        output.write_forward_result(destination, solution)
+        output.write_forward_result(
+            destination,
+            solution,
+            every=case.resolved["output"]["every"],
+        )
 
 
 def _run_inverse(
@@ -67,10 +79,15 @@ def _run_inverse(
             destination / "inlet" / "initial_velocity.h5",
             solution.initial_velocity,
         )
-        output.write_inverse_result(destination, solution)
+        output.write_inverse_result(
+            destination,
+            solution,
+            every=case.resolved["output"]["every"],
+            ensemble_basis=case.resolved["output"].get("ensemble_basis", "final"),
+        )
 
 
-def run_loaded_case(
+def _run_loaded_case(
     case: LoadedCase,
     destination: PathLike,
     *,
@@ -84,6 +101,7 @@ def run_loaded_case(
     """
 
     destination = Path(destination).expanduser().resolve()
+    output.require_available_result_directory(destination)
     solver = case.resolved.get("solver", {})
     petsc_options = solver.get("petsc_options")
     if petsc_options:
@@ -153,8 +171,8 @@ def run_case(
     """Load and run one portable CFD case without finalizing PETSc by default."""
 
     case = load_case(case_path)
-    output_path = result_path(case.path, destination)
-    return run_loaded_case(
+    output_path = result_path(case, destination)
+    return _run_loaded_case(
         case,
         output_path,
         progress_kind=progress_kind,
@@ -162,4 +180,4 @@ def run_case(
     )
 
 
-__all__ = ["result_path", "run_case", "run_loaded_case"]
+__all__ = ["result_path", "run_case"]

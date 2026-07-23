@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import femx
@@ -11,7 +12,7 @@ from femx_cfd import (
     VelocityData,
     make_velocity_obs,
 )
-from femx_cfd.runtime.output import write_truth
+from femx_cfd.runtime.output import write_result
 
 
 class EnVarWorkflowTest(unittest.TestCase):
@@ -79,7 +80,7 @@ class EnVarWorkflowTest(unittest.TestCase):
         self.assertEqual(envar.solver.num_solves, 3)
         self.assertEqual(
             envar.solver.assembly_calls,
-            res.num_forwards * prob.model.num_steps,
+            prob.model.num_steps,
         )
         self.assertTrue(
             any(
@@ -100,7 +101,7 @@ class EnVarWorkflowTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             h5_path = Path(tmp_dir) / "truth.h5"
             xdmf_path = Path(tmp_dir) / "truth.xdmf"
-            write_truth(h5_path, prob.model, truth)
+            prob.model.write_xdmf(xdmf_path, truth)
 
             self.assertTrue(h5_path.is_file())
             self.assertTrue(xdmf_path.is_file())
@@ -109,6 +110,55 @@ class EnVarWorkflowTest(unittest.TestCase):
                     len(h5["Data"]),
                     prob.model.num_steps + 1,
                 )
+
+    def test_writes_selected_inverse_levels_and_observation_samples(self):
+        mesh_file = Path(__file__).resolve().parents[1] / "data" / "2d_tiny_tube.msh"
+        model = femx.NavierStokesModel(
+            mesh_file,
+            num_steps=6,
+            dt=0.25,
+            rho=1.0,
+            mu=0.01,
+        )
+        problem = femx.NavierStokesProblem(model)
+        problem.add_bc(femx.DirichletBC("wall", "velocity", (0.0, 0.0)))
+        problem.add_bc(femx.DirichletBC("outlet", "pressure", 0.0))
+        trajectory = problem.solve()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output = Path(tmp_dir) / "estimate"
+            write_result(
+                output,
+                model,
+                "var",
+                {"param": np.asarray([])},
+                trajectory,
+                {},
+                every=3,
+                required_times=np.asarray([0.375]),
+            )
+            observation = output / "flow_observation.xdmf"
+
+            with h5py.File(output / "result.h5") as h5:
+                np.testing.assert_array_equal(
+                    h5["estimate/state_levels"],
+                    [0, 3, 6],
+                )
+                np.testing.assert_allclose(
+                    h5["estimate/state_times"],
+                    [0.0, 0.75, 1.5],
+                )
+                self.assertEqual(len(h5["estimate/fields"]), 3)
+                self.assertIn("observation_fields", h5["estimate"])
+            times = [
+                float(item.attrib["Value"])
+                for item in ET.parse(observation).iter("Time")
+            ]
+            np.testing.assert_allclose(times, [0.375])
+            self.assertIn(
+                "result.h5:/estimate/observation_fields/step_000000/velocity",
+                observation.read_text(encoding="utf-8"),
+            )
 
     def test_coefficient_bounds_are_applied_to_navier_stokes_envar(self):
         prob, op = self.make_prob()

@@ -96,8 +96,6 @@ class VarTest(unittest.TestCase):
             init_weight=0.05,
             space_weight=0.1,
             time_weight=0.05,
-            compat_modes=np.array([[0.2], [0.1]]),
-            compat_weight=0.3,
         )
         var = Var(prob, obs, reg=reg.obj, init_params=reg.bg)
         param = np.array([0.1, 0.15, 0.5])
@@ -109,8 +107,6 @@ class VarTest(unittest.TestCase):
             0.5 * 0.05 * 0.1**2,
         )
         self.assertEqual(reg.init_weight, 0.05)
-        self.assertEqual(reg.compat_weight, 0.3)
-        self.assertIsNotNone(reg.compat_obj)
 
         _, grad = var.value_grad(param)
         self.assertGreater(abs(grad[0]), 1.0e-4)

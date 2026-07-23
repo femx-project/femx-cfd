@@ -128,24 +128,6 @@ def _ctr_mats(prob: Dynamic) -> tuple[Dynamic, Dynamic]:
     return stiffness, mass
 
 
-def _compat_mat(prob: Dynamic, modes: np.ndarray) -> Dynamic:
-    modes = np.asarray(modes, dtype=float)
-    expected = (prob.num_ctr_param, prob.num_init_param)
-    if modes.shape != expected:
-        raise ValueError(f"compat_modes must have shape {expected}")
-    if not np.all(np.isfinite(modes)):
-        raise ValueError("compat_modes must be finite")
-    if np.linalg.matrix_rank(modes) != prob.num_init_param:
-        raise ValueError("compat_modes must have full column rank")
-
-    proj = sparse.csr_matrix(np.linalg.pinv(modes))
-    res = sparse.hstack(
-        (sparse.eye(prob.num_init_param, format="csr"), -proj),
-        format="csr",
-    )
-    return (res.T @ res).tocsr()
-
-
 @dataclass(frozen=True)
 class Regularization:
     """Navier--Stokes regularization and its individual components."""
@@ -155,14 +137,12 @@ class Regularization:
     bg_obj: object
     space_obj: object
     time_obj: object
-    compat_obj: object
     init_bg_obj: object
     ctr_bg_obj: object
     bg_weight: float
     init_weight: float
     space_weight: float
     time_weight: float
-    compat_weight: float
 
 
 def make_reg(
@@ -173,10 +153,8 @@ def make_reg(
     init_weight: Dynamic = None,
     space_weight: float = 0.0,
     time_weight: float = 0.0,
-    compat_modes: Dynamic = None,
-    compat_weight: float = 0.0,
 ) -> Regularization:
-    """Build the spatial, temporal, and compatibility regularization."""
+    """Build spatial, temporal, and background regularization."""
 
     bg = prob.param if bg is None else _params(bg, prob.num_param, "bg")
     bg_weight = _weight(bg_weight, "bg_weight")
@@ -186,16 +164,10 @@ def make_reg(
     )
     space_weight = _weight(space_weight, "space_weight")
     time_weight = _weight(time_weight, "time_weight")
-    compat_weight = _weight(compat_weight, "compat_weight")
-    if compat_weight and compat_modes is None:
-        raise ValueError("compat_modes is required when compat_weight is nonzero")
-    if compat_modes is not None and not prob.num_init_param:
-        raise ValueError("compat_modes requires initial-state parameters")
 
     stiffness, mass = _ctr_mats(prob)
     init_bg_obj = None
     ctr_bg_obj = None
-    compat_obj = None
     if prob.num_init_param:
         init_mat, bg_mat, space_mat, time_mat = _combined_mats(
             prob,
@@ -243,14 +215,6 @@ def make_reg(
     obj.add(bg_obj)
     obj.add(space_obj)
     obj.add(time_obj)
-    if compat_modes is not None and compat_weight:
-        compat_obj = _full_reg(
-            prob,
-            _compat_mat(prob, compat_modes),
-            compat_weight,
-            bg,
-        )
-        obj.add(compat_obj)
 
     return Regularization(
         obj=obj,
@@ -258,12 +222,10 @@ def make_reg(
         bg_obj=bg_obj,
         space_obj=space_obj,
         time_obj=time_obj,
-        compat_obj=compat_obj,
         init_bg_obj=init_bg_obj,
         ctr_bg_obj=ctr_bg_obj,
         bg_weight=bg_weight,
         init_weight=init_weight,
         space_weight=space_weight,
         time_weight=time_weight,
-        compat_weight=compat_weight,
     )

@@ -39,7 +39,7 @@ class InverseSolution:
     initial_inlet: Dynamic
     initial_velocity: InletVelocityData
     predicted_velocity: VelocityData
-    initial_ensembles: tuple[Config, ...] = ()
+    ensemble_bases: tuple[Dynamic, ...] = ()
 
 
 def _predicted_velocity(velocity: VelocityData, values: Dynamic) -> VelocityData:
@@ -74,6 +74,7 @@ def _problem_case(case: Config, mesh_path: Path, dimension: int) -> Config:
         "control": case["control"],
         "bc": fixed_conditions(case, dimension),
         "solver": case["solver"],
+        "output": case["output"],
     }
     if case["method"] == "var":
         problem["var"] = case["algorithm"]
@@ -181,7 +182,10 @@ def _solve_var(
     return InverseSolution(
         model=problem.model,
         method="var",
-        values={"param": result.param, "pred": result.pred},
+        values={
+            "parameters": result.param,
+            "predicted_observations": result.pred,
+        },
         trajectory=result.traj,
         metrics={
             "backend": backend,
@@ -210,8 +214,8 @@ def _solve_envar(
     prog.stage("input: loading prepared velocity observations")
     velocity = load_velocity(case["observations_path"])
     current_inlet = inlet
-    initial_ensembles = []
     outer_results = []
+    ensemble_bases = []
     total = options["outer_iterations"]
 
     for outer in range(1, total + 1):
@@ -245,23 +249,8 @@ def _solve_envar(
             spin.ctr_mean,
             spin.ctr_modes,
         )
-        initial_ensemble = None
-        if case["ensemble"]["save_initial_states"]:
-            labels = ["mean"]
-            labels.extend(f"alpha_{name}" for name in spin.names)
-            initial_ensemble = {
-                "labels": tuple(labels),
-                "states": np.vstack(
-                    (
-                        spin.init_mean,
-                        spin.init_mean[None, :] + spin.init_modes.T,
-                    )
-                ),
-            }
-            initial_ensembles.append(initial_ensemble)
-
         stage("building the observation basis")
-        observation_basis = ns.build_obs_basis(
+        observation_basis, trajectory_basis = ns.build_obs_basis(
             case,
             current_inlet,
             spin,
@@ -269,7 +258,9 @@ def _solve_envar(
             parameter_basis,
             stage,
             progress=prog,
+            capture_states=True,
         )
+        ensemble_bases.append(trajectory_basis)
 
         stage("estimating ensemble coefficients")
         analysis = EnVar(
@@ -283,8 +274,6 @@ def _solve_envar(
         )
         result = analysis.solve(prog=_outer_progress(prog, label))
         outer_results.append(result)
-        if initial_ensemble is not None:
-            initial_ensemble["analysis_state"] = result.traj.values[0].copy()
 
         if outer < total:
             begin = problem.ctr_param_offset
@@ -299,12 +288,14 @@ def _solve_envar(
         model=problem.model,
         method="envar",
         values={
-            "param": result.param,
-            "coeff": result.coeff,
-            "param_history": np.stack([item.param for item in outer_results]),
-            "coeff_history": np.stack([item.coeff for item in outer_results]),
-            "pred": result.pred,
-            "linear_pred": result.linear_pred,
+            "parameters": result.param,
+            "coefficients": result.coeff,
+            "parameter_history": np.stack([item.param for item in outer_results]),
+            "coefficient_history": np.stack([item.coeff for item in outer_results]),
+            "coefficient_names": np.asarray(trajectory_basis.coefficient_names),
+            "coefficient_covariance": result.coefficient_covariance,
+            "predicted_observations": result.pred,
+            "linear_predicted_observations": result.linear_pred,
         },
         trajectory=result.traj,
         metrics={
@@ -336,7 +327,7 @@ def _solve_envar(
         initial_inlet=inlet,
         initial_velocity=inlet_velocity,
         predicted_velocity=_predicted_velocity(velocity, result.pred),
-        initial_ensembles=tuple(initial_ensembles),
+        ensemble_bases=tuple(ensemble_bases),
     )
 
 

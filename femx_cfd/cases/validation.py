@@ -17,6 +17,23 @@ def mapping(value: Dynamic, name: str) -> Config:
     return value
 
 
+def reject_unknown(value: Config, allowed: set[str], name: str) -> None:
+    unknown = set(value).difference(allowed)
+    if unknown:
+        names = ", ".join(sorted(unknown))
+        raise ValueError(f"{name} contains unknown options: {names}")
+
+
+def finite(value: Dynamic, name: str) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{name} must be a finite number") from error
+    if not np.isfinite(number):
+        raise ValueError(f"{name} must be a finite number")
+    return number
+
+
 def positive(value: Dynamic, name: str) -> float:
     try:
         number = float(value)
@@ -34,6 +51,18 @@ def nonnegative(value: Dynamic, name: str) -> float:
         raise ValueError(f"{name} must be a nonnegative number") from error
     if not np.isfinite(number) or number < 0.0:
         raise ValueError(f"{name} must be a nonnegative number")
+    return number
+
+
+def positive_integer(value: Dynamic, name: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a positive integer")
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{name} must be a positive integer") from error
+    if number <= 0 or number != value:
+        raise ValueError(f"{name} must be a positive integer")
     return number
 
 
@@ -65,6 +94,7 @@ def validate_mesh(value: Dynamic, base_dir: Optional[PathLike]) -> Config:
     if isinstance(value, str):
         value = {"path": value, "length_unit": "m"}
     options = mapping(value, "mesh")
+    reject_unknown(options, {"path", "length_unit"}, "mesh")
     path = resolve_file(options.get("path"), "mesh", base_dir)
     length_unit = options.get("length_unit", "m")
     if length_unit not in LENGTH_SCALES:
@@ -75,6 +105,7 @@ def validate_mesh(value: Dynamic, base_dir: Optional[PathLike]) -> Config:
 
 def validate_fluid(value: Dynamic) -> Config:
     fluid = mapping(value, "fluid")
+    reject_unknown(fluid, {"rho", "mu"}, "fluid")
     fluid["rho"] = positive(fluid.get("rho"), "fluid.rho")
     fluid["mu"] = positive(fluid.get("mu"), "fluid.mu")
     return fluid
@@ -82,6 +113,7 @@ def validate_fluid(value: Dynamic) -> Config:
 
 def validate_solver(value: Dynamic) -> Config:
     solver = mapping({} if value is None else value, "solver")
+    reject_unknown(solver, {"backend", "petsc_options", "options"}, "solver")
     backend = solver.get("backend", "petsc")
     if not isinstance(backend, str) or not backend:
         raise ValueError("solver.backend must be a nonempty string")
@@ -95,6 +127,91 @@ def validate_solver(value: Dynamic) -> Config:
     return solver
 
 
+def validate_profile(value: Dynamic, name: str) -> Config:
+    """Validate one analytic inlet spatial profile."""
+
+    profile = mapping(value, name)
+    kind = profile.get("kind")
+    if kind == "uniform":
+        reject_unknown(profile, {"kind", "value"}, name)
+        profile["value"] = positive(profile.get("value"), f"{name}.value")
+    elif kind == "poisson":
+        reject_unknown(profile, {"kind", "peak", "skew"}, name)
+        profile["peak"] = positive(profile.get("peak"), f"{name}.peak")
+        if "skew" in profile:
+            profile["skew"] = finite(profile["skew"], f"{name}.skew")
+    else:
+        raise ValueError(f"{name}.kind must be 'uniform' or 'poisson'")
+    return profile
+
+
+def validate_waveform(value: Dynamic, name: str) -> Config:
+    """Validate one analytic inlet temporal waveform."""
+
+    waveform = mapping(value, name)
+    kind = waveform.get("kind", "uniform")
+    if kind == "uniform":
+        reject_unknown(waveform, {"kind", "value"}, name)
+        waveform["value"] = finite(waveform.get("value", 1.0), f"{name}.value")
+    elif kind == "harmonics":
+        reject_unknown(waveform, {"kind", "mean", "terms"}, name)
+        waveform["mean"] = finite(waveform.get("mean", 1.0), f"{name}.mean")
+        terms = waveform.get("terms", [])
+        if not isinstance(terms, list):
+            raise ValueError(f"{name}.terms must be a list")
+        for index, term in enumerate(terms):
+            prefix = f"{name}.terms[{index}]"
+            term = mapping(term, prefix)
+            reject_unknown(term, {"order", "amplitude", "phase", "kind"}, prefix)
+            term["order"] = positive_integer(term.get("order"), f"{prefix}.order")
+            term["amplitude"] = finite(
+                term.get("amplitude"),
+                f"{prefix}.amplitude",
+            )
+            term["phase"] = finite(term.get("phase", 0.0), f"{prefix}.phase")
+            term_kind = term.get("kind", "sin")
+            if term_kind not in ("sin", "cos"):
+                raise ValueError(f"{prefix}.kind must be 'sin' or 'cos'")
+            term["kind"] = term_kind
+            terms[index] = term
+        waveform["terms"] = terms
+    else:
+        raise ValueError(f"{name}.kind must be 'uniform' or 'harmonics'")
+    waveform["kind"] = kind
+    return waveform
+
+
+def validate_output(
+    value: Dynamic,
+    base_dir: Optional[PathLike],
+    *,
+    num_steps: int,
+) -> Config:
+    """Validate output placement and trajectory sampling options."""
+
+    output = mapping({} if value is None else value, "output")
+    reject_unknown(output, {"directory", "every"}, "output")
+
+    every = output.get("every", 1)
+    if isinstance(every, bool) or not isinstance(every, int) or every <= 0:
+        raise ValueError("output.every must be a positive integer")
+    if num_steps % every != 0:
+        raise ValueError(
+            f"output.every ({every}) must divide the {num_steps} integration steps"
+        )
+
+    validated = {"every": every}
+    directory = output.get("directory")
+    if directory is not None:
+        if not isinstance(directory, str) or not directory:
+            raise ValueError("output.directory must be a nonempty path")
+        path = Path(directory).expanduser()
+        if not path.is_absolute() and base_dir is not None:
+            path = Path(base_dir) / path
+        validated["directory"] = str(path.resolve())
+    return validated
+
+
 def validate_fixed_boundaries(
     conditions: Dynamic,
     *,
@@ -106,6 +223,11 @@ def validate_fixed_boundaries(
     names = set()
     for index, condition in enumerate(conditions):
         condition = mapping(condition, f"boundary_conditions[{index}]")
+        reject_unknown(
+            condition,
+            {"boundary", "kind", "value"},
+            f"boundary_conditions[{index}]",
+        )
         boundary = condition.get("boundary")
         if not isinstance(boundary, str) or not boundary:
             raise ValueError(
@@ -156,13 +278,19 @@ def validate_fixed_boundaries(
 
 __all__ = [
     "LENGTH_SCALES",
+    "finite",
     "integer_multiple",
     "mapping",
     "nonnegative",
     "positive",
+    "positive_integer",
+    "reject_unknown",
     "resolve_file",
     "validate_fixed_boundaries",
     "validate_fluid",
     "validate_mesh",
+    "validate_output",
+    "validate_profile",
     "validate_solver",
+    "validate_waveform",
 ]

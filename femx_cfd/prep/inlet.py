@@ -8,7 +8,7 @@ import numpy as np
 from femx_cfd._typing import Config, Dynamic
 from femx_cfd.data import InletData, InletVelocityData, load_velocity
 
-from .mri import project_to_inlet
+from .mri import project_poisson_fourier_to_inlet, project_to_inlet
 
 
 def inlet_normal(
@@ -75,7 +75,7 @@ def _waveform(times: np.ndarray, period: float, cfg: Config) -> np.ndarray:
 
     vals = np.full(times.size, float(cfg.get("mean", 1.0)))
     omega = 2.0 * np.pi / period
-    for harmonic in cfg.get("terms", cfg.get("harmonics", [])):
+    for harmonic in cfg.get("terms", []):
         order = int(harmonic["order"])
         amp = float(harmonic["amplitude"])
         phase = float(harmonic.get("phase", 0.0))
@@ -200,22 +200,6 @@ def normal_inlet(
     )
 
 
-def vector_inlet(inlet: InletData) -> InletVelocityData:
-    """Expand a prepared normal control into its equivalent vector velocity."""
-
-    if not isinstance(inlet, InletData):
-        raise TypeError("inlet must be InletData")
-    return InletVelocityData(
-        boundary=inlet.boundary,
-        times=inlet.times,
-        node_ids=inlet.node_ids,
-        coords=inlet.coords,
-        vals=inlet.vals[..., None] * inlet.normal,
-        periodic=inlet.periodic,
-        source=inlet.source,
-    )
-
-
 def reconstruct_velocity_inlet(
     surface: Dynamic,
     cfg: Config,
@@ -225,19 +209,38 @@ def reconstruct_velocity_inlet(
     """Reconstruct MRI vector velocity on the inlet surface nodes."""
 
     velocity = load_velocity(cfg["file"])
-    profiles = project_to_inlet(
-        surface,
-        velocity.points,
-        velocity.times,
-        velocity.vals,
-        normal,
-        cfg["projection"],
-    )
-    times, vals = _periodic(
-        velocity.times,
-        profiles,
-        float(cfg["T"]),
-    )
+    projection = cfg["projection"]
+    if projection.get("kind", "laplacian") == "poisson_fourier":
+        period = float(cfg["T"])
+        dt = float(cfg["dt"])
+        count = int(round(period / dt))
+        if count <= 0 or not np.isclose(count * dt, period):
+            raise ValueError("inlet period must be an integer multiple of dt")
+        times = np.linspace(0.0, period, count + 1)
+        vals, _ = project_poisson_fourier_to_inlet(
+            surface,
+            velocity.points,
+            velocity.times,
+            velocity.vals,
+            normal,
+            projection,
+            period=period,
+            output_times=times,
+        )
+    else:
+        profiles = project_to_inlet(
+            surface,
+            velocity.points,
+            velocity.times,
+            velocity.vals,
+            normal,
+            projection,
+        )
+        times, vals = _periodic(
+            velocity.times,
+            profiles,
+            float(cfg["T"]),
+        )
     active = surface.interior_node_ids
     if boundary is None:
         boundary = cfg["boundary"]
@@ -250,23 +253,6 @@ def reconstruct_velocity_inlet(
         periodic=True,
         source="velocity",
     )
-
-
-def velocity_inlet(
-    surface: Dynamic,
-    cfg: Config,
-    normal: np.ndarray,
-    boundary: Optional[str] = None,
-) -> InletData:
-    """Reconstruct vector velocity and extract its configured normal control."""
-
-    reconstructed = reconstruct_velocity_inlet(
-        surface,
-        cfg,
-        normal,
-        boundary,
-    )
-    return normal_inlet(reconstructed, normal, boundary)
 
 
 def make_inlet(cfg: Config) -> InletData:
@@ -301,7 +287,13 @@ def make_inlet(cfg: Config) -> InletData:
             time=inlet_bc["time"],
         )
     if opts["source"] == "velocity":
-        return velocity_inlet(surface, opts, normal, boundary)
+        velocity = reconstruct_velocity_inlet(
+            surface,
+            opts,
+            normal,
+            boundary,
+        )
+        return normal_inlet(velocity, normal, boundary)
     raise ValueError("inlet source must be 'analytic' or 'velocity'")
 
 
@@ -310,7 +302,16 @@ def make_inlet_velocity(cfg: Config) -> InletVelocityData:
 
     opts = cfg["inlet"]
     if opts["source"] == "analytic":
-        return vector_inlet(make_inlet(cfg))
+        inlet = make_inlet(cfg)
+        return InletVelocityData(
+            boundary=inlet.boundary,
+            times=inlet.times,
+            node_ids=inlet.node_ids,
+            coords=inlet.coords,
+            vals=inlet.vals[..., None] * inlet.normal,
+            periodic=inlet.periodic,
+            source=inlet.source,
+        )
     if opts["source"] != "velocity":
         raise ValueError("inlet source must be 'analytic' or 'velocity'")
 

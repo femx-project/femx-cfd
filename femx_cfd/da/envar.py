@@ -144,6 +144,7 @@ def _build_obs_basis(
 @dataclass(frozen=True)
 class _LinearResult:
     coeff: np.ndarray
+    coefficient_covariance: np.ndarray
     param: np.ndarray
     pred: np.ndarray
     obj: float
@@ -220,6 +221,8 @@ class _LinearProblem:
                     f"bounded EnVar least-squares solve failed: {res.message}"
                 )
             coeff = res.x
+        inverse_design = np.linalg.pinv(lhs)
+        coefficient_covariance = inverse_design @ inverse_design.T
 
         params = self._param_basis.evaluate(coeff)
         pred = self._obs_basis.evaluate(coeff)
@@ -230,6 +233,7 @@ class _LinearProblem:
 
         return _LinearResult(
             coeff=coeff.copy(),
+            coefficient_covariance=coefficient_covariance,
             param=params.copy(),
             pred=pred.copy(),
             obj=obs_misfit + prior,
@@ -244,6 +248,7 @@ class EnVarResult:
     """Result of an EnVar solve and its nonlinear forward validation."""
 
     coeff: np.ndarray
+    coefficient_covariance: np.ndarray
     param: np.ndarray
     traj: object
     pred: np.ndarray
@@ -375,6 +380,7 @@ class EnVar:
         pred = self._obs.op.predict(traj)
         return EnVarResult(
             coeff=lin.coeff,
+            coefficient_covariance=lin.coefficient_covariance,
             param=lin.param,
             traj=traj,
             pred=pred.copy(),

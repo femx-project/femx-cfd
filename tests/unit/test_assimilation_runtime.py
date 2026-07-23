@@ -5,8 +5,12 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from femx_cfd import VelocityData, save_velocity
-from femx_cfd.runtime.output import bundle_result, write_observations
+from femx_cfd import VelocityData, load_case, save_velocity
+from femx_cfd.runtime.output import (
+    bundle_result,
+    trajectory_levels,
+    write_velocity_series,
+)
 from femx_cfd.runtime.runner import result_path
 
 
@@ -20,6 +24,27 @@ class ResultPathTest(unittest.TestCase):
         self.assertEqual(result, (Path.cwd() / "runs/example").resolve())
         self.assertEqual(result_path(case), case.parent / "result")
 
+    def test_uses_the_case_output_directory_unless_cli_overrides_it(self):
+        case = load_case(
+            Path(__file__).resolve().parents[2]
+            / "examples/forward/straight_tube/case.yaml"
+        )
+
+        self.assertEqual(result_path(case), case.path.parent / "result")
+        self.assertEqual(
+            result_path(case, "runs/override"),
+            (Path.cwd() / "runs/override").resolve(),
+        )
+
+
+class TrajectoryLevelsTest(unittest.TestCase):
+    def test_keeps_uniform_initial_and_final_levels(self):
+        np.testing.assert_array_equal(trajectory_levels(10, 5), [0, 5, 10])
+
+    def test_rejects_a_nonuniform_final_interval(self):
+        with self.assertRaisesRegex(ValueError, "must divide"):
+            trajectory_levels(10, 4)
+
 
 class ResultBundleTest(unittest.TestCase):
     def test_xdmf_data_is_merged_into_result_h5(self):
@@ -32,10 +57,10 @@ class ResultBundleTest(unittest.TestCase):
             with h5py.File(src / "algorithm.h5", "w") as h5:
                 h5.create_dataset("param", data=[1.0, 2.0])
             with h5py.File(src / "estimate.h5", "w") as h5:
-                h5.create_group("Mesh").create_dataset("Geometry", data=[[0, 0]])
-                h5.create_group("Data").create_dataset("velocity", data=[[3.0]])
+                h5.create_group("mesh").create_dataset("geometry", data=[[0, 0]])
+                h5.create_group("data").create_dataset("velocity", data=[[3.0]])
             (src / "estimate.xdmf").write_text(
-                '<DataItem Format="HDF">estimate.h5:/Data/velocity</DataItem>\n',
+                '<DataItem Format="HDF">estimate.h5:/data/velocity</DataItem>\n',
                 encoding="utf-8",
             )
 
@@ -48,10 +73,17 @@ class ResultBundleTest(unittest.TestCase):
 
             with h5py.File(out / "result.h5") as h5:
                 np.testing.assert_allclose(h5["param"], [1.0, 2.0])
-                np.testing.assert_allclose(h5["Data/velocity"], [[3.0]])
-                self.assertEqual(h5["metrics"].attrs["objective"], 1.25)
+                self.assertEqual(list(h5["mesh"]), ["geometry"])
+                np.testing.assert_allclose(
+                    h5["estimate/fields/velocity"],
+                    [[3.0]],
+                )
+                self.assertEqual(
+                    h5["estimate/metrics"].attrs["objective"],
+                    1.25,
+                )
             self.assertIn(
-                "result.h5:/Data/velocity",
+                "result.h5:/estimate/fields/velocity",
                 (out / "flow.xdmf").read_text(encoding="utf-8"),
             )
 
@@ -72,7 +104,7 @@ class ObservationVtuTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             heavy = Path(tmp_dir) / "velocity.h5"
             save_velocity(heavy, velocity)
-            pvd = write_observations(heavy, velocity)
+            pvd = write_velocity_series(heavy.with_suffix(".pvd"), velocity)
             pvd_text = pvd.read_text(encoding="utf-8")
             first = Path(tmp_dir) / "velocity/velocity_00000.vtu"
             second = Path(tmp_dir) / "velocity/velocity_00001.vtu"

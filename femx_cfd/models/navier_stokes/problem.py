@@ -26,8 +26,6 @@ def add_bc(prob: Dynamic, cfg: Config) -> None:
             ) from error
         if boundary == cfg["control"]["boundary"] and field == "velocity":
             continue
-        if condition.get("components", "all") != "all":
-            raise ValueError("component-selective fixed bc is not implemented")
         if space.get("kind") != "uniform" or time.get("kind") != "uniform":
             raise ValueError("fixed boundary conditions require uniform values")
         prob.add_bc(femx.DirichletBC(boundary, field, space["value"]))

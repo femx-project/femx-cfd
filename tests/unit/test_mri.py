@@ -4,7 +4,10 @@ from pathlib import Path
 import femx
 import numpy as np
 
-from femx_cfd.prep.mri import project_to_inlet
+from femx_cfd.prep.mri import (
+    project_poisson_fourier_to_inlet,
+    project_to_inlet,
+)
 
 
 MESH = Path(__file__).resolve().parents[1] / "data" / "2d_tiny_tube.msh"
@@ -54,6 +57,36 @@ class MriProjectionTest(unittest.TestCase):
             np.linalg.norm(np.diff(regularized, axis=0)),
             np.linalg.norm(np.diff(unregularized, axis=0)),
         )
+
+    def test_recovers_poisson_profile_and_fourier_waveform(self):
+        normal = np.asarray([1.0, 0.0])
+        points = np.asarray(self.surface.coordinates)[:, :2] + 0.1 * normal
+        times = np.asarray([0.0, 0.25, 0.5, 0.75])
+        output_times = np.linspace(0.0, 1.0, 9)
+        _, _, load = self.surface.laplacian_matrices()
+        profile = float(np.sum(load)) * self.surface.poisson_profile(normalize=True)
+        waveform = 0.2 + 0.05 * np.sin(2.0 * np.pi * times)
+        waveform += 0.03 * np.cos(2.0 * np.pi * times)
+        velocity = waveform[:, None, None] * profile[None, :, None] * normal
+        velocity[..., 1] += 2.0
+
+        reconstructed, coeff = project_poisson_fourier_to_inlet(
+            self.surface,
+            points,
+            times,
+            velocity,
+            normal,
+            {"depth": 0.2, "fourier_order": 1},
+            period=1.0,
+            output_times=output_times,
+        )
+
+        expected_waveform = 0.2 + 0.05 * np.sin(2.0 * np.pi * output_times)
+        expected_waveform += 0.03 * np.cos(2.0 * np.pi * output_times)
+        expected = expected_waveform[:, None, None] * profile[None, :, None] * normal
+        expected[-1] = expected[0]
+        np.testing.assert_allclose(coeff, [0.2, 0.05, 0.03], atol=1.0e-12)
+        np.testing.assert_allclose(reconstructed, expected, atol=1.0e-12)
 
 
 if __name__ == "__main__":

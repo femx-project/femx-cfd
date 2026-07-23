@@ -4,7 +4,7 @@ import json
 import sys
 from typing import Optional, TextIO
 
-from femx_cfd._typing import Dynamic, Progress, ProgressEvent
+from femx_cfd._typing import Dynamic, ProgressEvent
 
 
 class ConsoleProgress:
@@ -163,9 +163,3 @@ class JsonProgress:
 
     def close(self) -> None:
         return None
-
-
-def console(enabled: bool = True) -> Progress:
-    """Return terminal progress on root and a no-op sink elsewhere."""
-
-    return ConsoleProgress() if enabled else NullProgress()

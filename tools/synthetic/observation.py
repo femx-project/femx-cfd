@@ -32,11 +32,86 @@ def _make_truth_problem(
     return problem, inlet.params_for(problem), cycles
 
 
+def _mesh_mask(points: np.ndarray, mesh: Dynamic) -> np.ndarray:
+    """Retain lattice points contained in top-dimensional Gmsh elements."""
+
+    try:
+        import gmsh
+    except ImportError as error:
+        raise RuntimeError(
+            "mesh-masked observations require Gmsh; install it with `pip install gmsh`"
+        ) from error
+
+    if not isinstance(mesh, (str, bytes)):
+        raise ValueError("observation.mask 'mesh' requires a mesh path")
+
+    owns_session = not gmsh.isInitialized()
+    previous_model = ""
+    mask_model = ""
+    terminal = None
+    try:
+        if owns_session:
+            gmsh.initialize()
+        models = set(gmsh.model.list())
+        if models:
+            previous_model = gmsh.model.getCurrent()
+        mask_model = "femx-cfd-observation-mask"
+        while mask_model in models:
+            mask_model += "-"
+        gmsh.model.add(mask_model)
+        gmsh.model.setCurrent(mask_model)
+        terminal = gmsh.option.getNumber("General.Terminal")
+        gmsh.option.setNumber("General.Terminal", 0)
+        gmsh.merge(str(mesh))
+        entities = gmsh.model.getEntities()
+        if not entities:
+            raise ValueError("observation mask mesh contains no elements")
+        dimension = max(dim for dim, _ in entities)
+
+        inside = np.zeros(points.shape[0], dtype=bool)
+        for index, point in enumerate(points):
+            coordinate = np.zeros(3)
+            coordinate[: point.size] = point
+            try:
+                gmsh.model.mesh.getElementByCoordinates(
+                    *coordinate,
+                    dim=dimension,
+                    strict=True,
+                )
+            except Exception as error:
+                if "No element found" not in str(error):
+                    raise
+            else:
+                inside[index] = True
+        return points[inside]
+    finally:
+        if terminal is not None and gmsh.isInitialized():
+            gmsh.option.setNumber("General.Terminal", terminal)
+        if mask_model and gmsh.isInitialized() and mask_model in gmsh.model.list():
+            gmsh.model.setCurrent(mask_model)
+            gmsh.model.remove()
+        if previous_model and gmsh.isInitialized():
+            gmsh.model.setCurrent(previous_model)
+        if owns_session and gmsh.isInitialized():
+            gmsh.finalize()
+
+
 def observation_points(case: Config) -> np.ndarray:
+    """Build the Cartesian observation lattice and apply its optional mask."""
+
     options = case["observation"]
     x = np.linspace(options["lower"][0], options["upper"][0], options["counts"][0])
     y = np.linspace(options["lower"][1], options["upper"][1], options["counts"][1])
-    return np.array([(px, py) for py in y for px in x])
+    points = np.array([(px, py) for py in y for px in x])
+    mask = options.get("mask", "none")
+    if mask == "none":
+        return points
+    if mask != "mesh":
+        raise ValueError("observation.mask must be 'none' or 'mesh'")
+    points = _mesh_mask(points, case.get("mesh"))
+    if points.shape[0] == 0:
+        raise ValueError("observation mask removed every candidate point")
+    return points
 
 
 def observation_times(case: Config, cycle: int = 1) -> np.ndarray:
@@ -76,13 +151,3 @@ def solve_truth_observations(
         vals=operator.reshape(operator.predict(truth)),
     )
     return problem.model, truth, velocity
-
-
-def make_velocity_observations(
-    case: Config,
-    inlet: InletData,
-    progress: OptionalProgress = None,
-) -> VelocityData:
-    """Solve the truth case and return its sampled velocity observations."""
-
-    return solve_truth_observations(case, inlet, progress)[2]

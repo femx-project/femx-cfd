@@ -2,64 +2,64 @@
 <Xdmf Version="3.0">
   <Domain>
     <Grid Name="time_series" GridType="Collection" CollectionType="Temporal">
-      <Grid Name="Step00000" GridType="Uniform">
+      <Grid Name="step_000000" GridType="Uniform">
         <Time Value="0" />
         <Topology TopologyType="Triangle" NumberOfElements="166">
-          <DataItem Dimensions="166 3" NumberType="Int" Precision="4" Format="HDF">flow_observation.h5:/Mesh/Topology</DataItem>
+          <DataItem Dimensions="166 3" NumberType="Int" Precision="4" Format="HDF">flow_observation.h5:/mesh/topology</DataItem>
         </Topology>
         <Geometry GeometryType="XYZ">
-          <DataItem Dimensions="104 3" NumberType="Float" Precision="8" Format="HDF">flow_observation.h5:/Mesh/Geometry</DataItem>
+          <DataItem Dimensions="104 3" NumberType="Float" Precision="8" Format="HDF">flow_observation.h5:/mesh/geometry</DataItem>
         </Geometry>
         <Attribute Name="pressure" AttributeType="Scalar" Center="Node">
-          <DataItem Dimensions="104" NumberType="Float" Precision="8" Format="HDF">flow_observation.h5:/Data/Step00000/pressure</DataItem>
+          <DataItem Dimensions="104" NumberType="Float" Precision="8" Format="HDF">flow_observation.h5:/data/step_000000/pressure</DataItem>
         </Attribute>
         <Attribute Name="velocity" AttributeType="Vector" Center="Node">
-          <DataItem Dimensions="104 3" NumberType="Float" Precision="8" Format="HDF">flow_observation.h5:/Data/Step00000/velocity</DataItem>
+          <DataItem Dimensions="104 3" NumberType="Float" Precision="8" Format="HDF">flow_observation.h5:/data/step_000000/velocity</DataItem>
         </Attribute>
       </Grid>
-      <Grid Name="Step00001" GridType="Uniform">
+      <Grid Name="step_000001" GridType="Uniform">
         <Time Value="0.25" />
         <Topology TopologyType="Triangle" NumberOfElements="166">
-          <DataItem Dimensions="166 3" NumberType="Int" Precision="4" Format="HDF">flow_observation.h5:/Mesh/Topology</DataItem>
+          <DataItem Dimensions="166 3" NumberType="Int" Precision="4" Format="HDF">flow_observation.h5:/mesh/topology</DataItem>
         </Topology>
         <Geometry GeometryType="XYZ">
-          <DataItem Dimensions="104 3" NumberType="Float" Precision="8" Format="HDF">flow_observation.h5:/Mesh/Geometry</DataItem>
+          <DataItem Dimensions="104 3" NumberType="Float" Precision="8" Format="HDF">flow_observation.h5:/mesh/geometry</DataItem>
         </Geometry>
         <Attribute Name="pressure" AttributeType="Scalar" Center="Node">
-          <DataItem Dimensions="104" NumberType="Float" Precision="8" Format="HDF">flow_observation.h5:/Data/Step00001/pressure</DataItem>
+          <DataItem Dimensions="104" NumberType="Float" Precision="8" Format="HDF">flow_observation.h5:/data/step_000001/pressure</DataItem>
         </Attribute>
         <Attribute Name="velocity" AttributeType="Vector" Center="Node">
-          <DataItem Dimensions="104 3" NumberType="Float" Precision="8" Format="HDF">flow_observation.h5:/Data/Step00001/velocity</DataItem>
+          <DataItem Dimensions="104 3" NumberType="Float" Precision="8" Format="HDF">flow_observation.h5:/data/step_000001/velocity</DataItem>
         </Attribute>
       </Grid>
-      <Grid Name="Step00002" GridType="Uniform">
+      <Grid Name="step_000002" GridType="Uniform">
         <Time Value="0.5" />
         <Topology TopologyType="Triangle" NumberOfElements="166">
-          <DataItem Dimensions="166 3" NumberType="Int" Precision="4" Format="HDF">flow_observation.h5:/Mesh/Topology</DataItem>
+          <DataItem Dimensions="166 3" NumberType="Int" Precision="4" Format="HDF">flow_observation.h5:/mesh/topology</DataItem>
         </Topology>
         <Geometry GeometryType="XYZ">
-          <DataItem Dimensions="104 3" NumberType="Float" Precision="8" Format="HDF">flow_observation.h5:/Mesh/Geometry</DataItem>
+          <DataItem Dimensions="104 3" NumberType="Float" Precision="8" Format="HDF">flow_observation.h5:/mesh/geometry</DataItem>
         </Geometry>
         <Attribute Name="pressure" AttributeType="Scalar" Center="Node">
-          <DataItem Dimensions="104" NumberType="Float" Precision="8" Format="HDF">flow_observation.h5:/Data/Step00002/pressure</DataItem>
+          <DataItem Dimensions="104" NumberType="Float" Precision="8" Format="HDF">flow_observation.h5:/data/step_000002/pressure</DataItem>
         </Attribute>
         <Attribute Name="velocity" AttributeType="Vector" Center="Node">
-          <DataItem Dimensions="104 3" NumberType="Float" Precision="8" Format="HDF">flow_observation.h5:/Data/Step00002/velocity</DataItem>
+          <DataItem Dimensions="104 3" NumberType="Float" Precision="8" Format="HDF">flow_observation.h5:/data/step_000002/velocity</DataItem>
         </Attribute>
       </Grid>
-      <Grid Name="Step00003" GridType="Uniform">
+      <Grid Name="step_000003" GridType="Uniform">
         <Time Value="0.75" />
         <Topology TopologyType="Triangle" NumberOfElements="166">
-          <DataItem Dimensions="166 3" NumberType="Int" Precision="4" Format="HDF">flow_observation.h5:/Mesh/Topology</DataItem>
+          <DataItem Dimensions="166 3" NumberType="Int" Precision="4" Format="HDF">flow_observation.h5:/mesh/topology</DataItem>
         </Topology>
         <Geometry GeometryType="XYZ">
-          <DataItem Dimensions="104 3" NumberType="Float" Precision="8" Format="HDF">flow_observation.h5:/Mesh/Geometry</DataItem>
+          <DataItem Dimensions="104 3" NumberType="Float" Precision="8" Format="HDF">flow_observation.h5:/mesh/geometry</DataItem>
         </Geometry>
         <Attribute Name="pressure" AttributeType="Scalar" Center="Node">
-          <DataItem Dimensions="104" NumberType="Float" Precision="8" Format="HDF">flow_observation.h5:/Data/Step00003/pressure</DataItem>
+          <DataItem Dimensions="104" NumberType="Float" Precision="8" Format="HDF">flow_observation.h5:/data/step_000003/pressure</DataItem>
         </Attribute>
         <Attribute Name="velocity" AttributeType="Vector" Center="Node">
-          <DataItem Dimensions="104 3" NumberType="Float" Precision="8" Format="HDF">flow_observation.h5:/Data/Step00003/velocity</DataItem>
+          <DataItem Dimensions="104 3" NumberType="Float" Precision="8" Format="HDF">flow_observation.h5:/data/step_000003/velocity</DataItem>
         </Attribute>
       </Grid>
     </Grid>

@@ -38,6 +38,7 @@ class ParallelEnsembleIntegrationTest(unittest.TestCase):
             "time": {"T": 0.5, "dt": 0.25},
             "simulation": {"end_time": 0.5},
             "solver": {"backend": "petsc"},
+            "output": {"every": 1},
             "ensemble": {
                 "workers": 2,
                 "modes": {
@@ -86,18 +87,28 @@ class ParallelEnsembleIntegrationTest(unittest.TestCase):
             spin.ctr_mean,
             spin.ctr_modes,
         )
-        obs_basis = ns.build_obs_basis(
+        obs_basis, trajectory_basis = ns.build_obs_basis(
             cfg,
             inlet,
             spin,
             velocity,
             param_basis,
             progress=events.append,
+            capture_states=True,
         )
 
         self.assertEqual(spin.init_modes.shape[1], 1)
         self.assertEqual(obs_basis.num_coefficients, 1)
         self.assertEqual(obs_basis.value_size, 8)
+        np.testing.assert_array_equal(trajectory_basis.state_levels, [0, 1, 2])
+        np.testing.assert_allclose(
+            trajectory_basis.state_times,
+            [0.0, 0.25, 0.5],
+        )
+        self.assertEqual(
+            trajectory_basis.perturbations.shape,
+            (1, 3, prob.model.num_states),
+        )
         self.assertTrue(
             any(
                 event["type"] == "ensemble_solve" and event["stage"] == "spin-up"

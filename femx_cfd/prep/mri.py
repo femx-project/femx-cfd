@@ -1,35 +1,8 @@
 """MRI loading and discrete-velocity projection onto an inlet."""
 
-import h5py
 import numpy as np
 
-from femx_cfd._typing import Config, Dynamic, PathLike
-
-
-def load_mri(path: PathLike) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    with h5py.File(path, "r") as h5:
-        if "x" not in h5 or "u" not in h5 or "t" not in h5:
-            raise ValueError("MRI HDF5 must contain x, u, and t")
-        pts = np.asarray(h5["x"][...], dtype=float)
-        vel_keys = sorted(h5["u"])
-        time_keys = sorted(h5["t"])
-        if vel_keys != time_keys or not vel_keys:
-            raise ValueError("MRI velocity and time keys must match")
-        times = np.asarray([h5["t"][key][()] for key in time_keys], dtype=float)
-        vel = np.stack([h5["u"][key][...] for key in vel_keys])
-
-    if pts.ndim != 2 or pts.shape[1] != 3 or pts.shape[0] == 0:
-        raise ValueError("MRI points must have shape (num_points, 3)")
-    if vel.shape != (times.size, pts.shape[0], 3):
-        raise ValueError("MRI velocity must have shape (num_times, num_points, 3)")
-    if (
-        not np.all(np.isfinite(pts))
-        or not np.all(np.isfinite(times))
-        or not np.all(np.isfinite(vel))
-        or np.any(np.diff(times) <= 0.0)
-    ):
-        raise ValueError("MRI data must be finite with increasing times")
-    return pts, times, np.asarray(vel, dtype=float)
+from femx_cfd._typing import Config, Dynamic
 
 
 def inlet_frame(
@@ -119,6 +92,109 @@ def _surface_stencils(
     return _triangle_stencils(local_nodes, elements, pts)
 
 
+def _inlet_samples(
+    surface: Dynamic,
+    pts: np.ndarray,
+    normal: np.ndarray,
+    depth: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return inlet interpolation stencils and distances for one axial slab."""
+
+    dim = pts.shape[1]
+    center, tangents, local = inlet_frame(surface, dim, normal)
+    rel = pts - center
+    dist = rel @ normal
+    proj = pts - dist[:, None] * normal
+    proj_local = (proj - center) @ tangents
+    selected = np.flatnonzero((dist >= -1.0e-8) & (dist <= depth))
+    stencils, keep = _surface_stencils(
+        local,
+        surface.elements,
+        proj_local[selected],
+    )
+    return stencils, selected[keep], dist[selected][keep]
+
+
+def _fourier_basis(times: np.ndarray, period: float, order: int) -> np.ndarray:
+    """Evaluate a real periodic Fourier basis through the requested order."""
+
+    columns = [np.ones_like(times, dtype=float)]
+    omega = 2.0 * np.pi / period
+    for harmonic in range(1, order + 1):
+        angle = harmonic * omega * times
+        columns.extend((np.sin(angle), np.cos(angle)))
+    return np.column_stack(columns)
+
+
+def project_poisson_fourier_to_inlet(
+    surface: Dynamic,
+    pts: np.ndarray,
+    times: np.ndarray,
+    vel: np.ndarray,
+    normal: np.ndarray,
+    opts: Config,
+    *,
+    period: float,
+    output_times: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Fit a mean-normalized Poisson profile with a Fourier flow waveform."""
+
+    stencils, selected, selected_dist = _inlet_samples(
+        surface,
+        pts,
+        normal,
+        opts["depth"],
+    )
+    if selected.size == 0:
+        raise ValueError("no inlet-near MRI points project onto the inlet surface")
+
+    _, _, load = surface.laplacian_matrices()
+    measure = float(np.sum(load))
+    if not np.isfinite(measure) or measure <= 0.0:
+        raise RuntimeError("inlet surface has a non-positive measure")
+    profile = measure * surface.poisson_profile(normalize=True)
+    sample_profile = stencils @ profile
+
+    order = int(opts["fourier_order"])
+    basis = _fourier_basis(np.asarray(times, dtype=float), period, order)
+    design = np.einsum("tb,p->tpb", basis, sample_profile).reshape(
+        -1,
+        basis.shape[1],
+    )
+    targets = np.einsum(
+        "tpd,d->tp",
+        np.asarray(vel)[:, selected],
+        normal,
+    ).reshape(-1)
+
+    decay = opts.get("axial_decay")
+    if decay is None:
+        point_weights = np.ones(selected.size)
+    else:
+        point_weights = np.exp(-0.5 * np.square(selected_dist / decay))
+    weights = np.tile(np.sqrt(point_weights), len(times))
+    weighted_design = weights[:, None] * design
+    if np.linalg.matrix_rank(weighted_design) < basis.shape[1]:
+        raise ValueError(
+            "inlet observations do not determine all requested Fourier coefficients"
+        )
+    coeff = np.linalg.lstsq(weighted_design, weights * targets, rcond=None)[0]
+
+    waveform = (
+        _fourier_basis(
+            np.asarray(output_times, dtype=float),
+            period,
+            order,
+        )
+        @ coeff
+    )
+    scalar = waveform[:, None] * profile
+    reconstructed = scalar[..., None] * np.asarray(normal)
+    if np.isclose(output_times[-1] - output_times[0], period):
+        reconstructed[-1] = reconstructed[0]
+    return reconstructed, coeff
+
+
 def project_to_inlet(
     surface: Dynamic,
     pts: np.ndarray,
@@ -130,19 +206,12 @@ def project_to_inlet(
     """Reconstruct all MRI velocity components on a smooth inlet field."""
 
     dim = pts.shape[1]
-    center, tangents, local = inlet_frame(surface, dim, normal)
-    rel = pts - center
-    dist = rel @ normal
-    proj = pts - dist[:, None] * normal
-    proj_local = (proj - center) @ tangents
-    selected = np.flatnonzero((dist >= -1.0e-8) & (dist <= opts["depth"]))
-    stencils, keep = _surface_stencils(
-        local,
-        surface.elements,
-        proj_local[selected],
+    stencils, selected, selected_dist = _inlet_samples(
+        surface,
+        pts,
+        normal,
+        opts["depth"],
     )
-    selected = selected[keep]
-    selected_dist = dist[selected]
     if selected.size < opts["laplacian_modes"] + 2:
         raise ValueError("too few inlet-near MRI points for the projection basis")
 
