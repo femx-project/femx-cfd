@@ -9,6 +9,7 @@ import numpy as np
 
 from femx_cfd._typing import Config, PathLike
 from femx_cfd.cases import FORWARD_FORMAT, LoadedCase, load_case
+from femx_cfd.cases.forward import inlet_boundary_condition
 from femx_cfd.mesh import mesh_in_meters
 from femx_cfd.prep.inlet import analytic_inlet, inlet_normal
 from femx_cfd.workflows.forward import _file_inlet
@@ -71,7 +72,7 @@ def _surface_scales(surface: object) -> tuple[float, float]:
 
 def _peak_inlet_speed(case: Config, mesh: object) -> tuple[float, object]:
     if case["format"] == FORWARD_FORMAT:
-        inlet_options = case["inlet"]
+        inlet_options = inlet_boundary_condition(case)
         surface = mesh.boundary(inlet_options["boundary"])
         normal = inlet_normal(mesh, surface, inlet_options["normal"])
         if inlet_options["source"] == "file":

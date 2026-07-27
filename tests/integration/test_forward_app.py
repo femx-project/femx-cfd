@@ -30,20 +30,24 @@ class ForwardApplicationTest(unittest.TestCase):
                 "mesh": {"path": "mesh.msh", "length_unit": "mm"},
                 "fluid": {"rho": 1.0, "mu": 0.01},
                 "time": {"dt": 0.25, "end_time": 0.25},
-                "inlet": {
-                    "boundary": "inlet",
-                    "normal": "auto",
-                    "profile": {"kind": "uniform", "value": 0.1},
-                },
                 "boundary_conditions": [
+                    {
+                        "boundary": "inlet",
+                        "kind": "velocity",
+                        "source": "analytic",
+                        "normal": "auto",
+                        "profile": {"kind": "uniform", "value": 0.1},
+                    },
                     {
                         "boundary": "wall",
                         "kind": "velocity",
+                        "source": "analytic",
                         "value": [0.0, 0.0],
                     },
                     {
                         "boundary": "outlet",
                         "kind": "pressure",
+                        "source": "analytic",
                         "value": 0.0,
                     },
                 ],
@@ -88,20 +92,24 @@ class ForwardApplicationTest(unittest.TestCase):
                 "mesh": {"path": "mesh.msh", "length_unit": "mm"},
                 "fluid": {"rho": 1.0, "mu": 0.01},
                 "time": {"dt": 0.25, "end_time": 1.0},
-                "inlet": {
-                    "boundary": "inlet",
-                    "normal": "auto",
-                    "profile": {"kind": "uniform", "value": 0.1},
-                },
                 "boundary_conditions": [
+                    {
+                        "boundary": "inlet",
+                        "kind": "velocity",
+                        "source": "analytic",
+                        "normal": "auto",
+                        "profile": {"kind": "uniform", "value": 0.1},
+                    },
                     {
                         "boundary": "wall",
                         "kind": "velocity",
+                        "source": "analytic",
                         "value": [0.0, 0.0],
                     },
                     {
                         "boundary": "outlet",
                         "kind": "pressure",
+                        "source": "analytic",
                         "value": 0.0,
                     },
                 ],
@@ -148,20 +156,23 @@ class ForwardApplicationTest(unittest.TestCase):
                 "mesh": {"path": "mesh.msh", "length_unit": "mm"},
                 "fluid": {"rho": 1.0, "mu": 0.01},
                 "time": {"dt": 0.25, "end_time": 0.25},
-                "inlet": {
-                    "source": "file",
-                    "boundary": "inlet",
-                    "path": "inlet.h5",
-                },
                 "boundary_conditions": [
+                    {
+                        "source": "file",
+                        "boundary": "inlet",
+                        "kind": "velocity",
+                        "path": "inlet.h5",
+                    },
                     {
                         "boundary": "wall",
                         "kind": "velocity",
+                        "source": "analytic",
                         "value": [0.0, 0.0],
                     },
                     {
                         "boundary": "outlet",
                         "kind": "pressure",
+                        "source": "analytic",
                         "value": 0.0,
                     },
                 ],
@@ -178,7 +189,12 @@ class ForwardApplicationTest(unittest.TestCase):
             snapshot = yaml.safe_load(
                 (directory / "result" / "case.yaml").read_text(encoding="utf-8")
             )
-            self.assertEqual(snapshot["inlet"]["path"], "../inlet.h5")
+            inlet = next(
+                condition
+                for condition in snapshot["boundary_conditions"]
+                if condition.get("source") == "file"
+            )
+            self.assertEqual(inlet["path"], "../inlet.h5")
 
     def test_does_not_overwrite_an_existing_result(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -193,19 +209,23 @@ class ForwardApplicationTest(unittest.TestCase):
                         "mesh": {"path": "mesh.msh", "length_unit": "m"},
                         "fluid": {"rho": 1.0, "mu": 0.01},
                         "time": {"dt": 0.25, "end_time": 0.25},
-                        "inlet": {
-                            "boundary": "inlet",
-                            "profile": {"kind": "uniform", "value": 0.1},
-                        },
                         "boundary_conditions": [
+                            {
+                                "boundary": "inlet",
+                                "kind": "velocity",
+                                "source": "analytic",
+                                "profile": {"kind": "uniform", "value": 0.1},
+                            },
                             {
                                 "boundary": "wall",
                                 "kind": "velocity",
+                                "source": "analytic",
                                 "value": [0.0, 0.0],
                             },
                             {
                                 "boundary": "outlet",
                                 "kind": "pressure",
+                                "source": "analytic",
                                 "value": 0.0,
                             },
                         ],

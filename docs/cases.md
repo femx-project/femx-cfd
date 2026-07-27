@@ -26,6 +26,25 @@ versions 1 and 2 remain loadable and are migrated to version 3 automatically.
 Inverse versions 1 and 2 also remain loadable; the version 1 normal-control
 default is preserved during migration.
 
+## Solver selection
+
+Select the execution platform independently from the linear solver:
+
+```yaml
+solver:
+  platform: cpu
+  backend: petsc
+```
+
+| `platform` | Supported `backend` |
+| --- | --- |
+| `cpu` (default) | `dense`, `resolve`, `petsc` when built |
+| `cuda` | `resolve` in a CUDA-enabled ReSolve build |
+
+Var keeps the forward and adjoint work on the selected platform. EnVar uses the
+same selection for every ensemble member and the final validation solve.
+An optional `solver.options` mapping is forwarded to each selected solver.
+
 ## Output
 
 Version 3 cases can keep their result placement with the numerical settings:
@@ -53,17 +72,22 @@ level count, and inlet-based Reynolds and CFL estimates. A nonempty result
 directory is never overwritten. An incompatible `every` value is rejected
 before inspection or execution.
 
-## Fixed boundaries
+## Boundary conditions
 
-Forward and inverse cases use explicit velocity vectors and pressure values:
+Every forward boundary, including the source-driven inlet, is declared in one
+`boundary_conditions` list. Every condition explicitly declares its `source`.
+Fixed values use `source: analytic` with an explicit velocity vector or
+pressure:
 
 ```yaml
 boundary_conditions:
   - boundary: wall
     kind: velocity
+    source: analytic
     value: [0.0, 0.0, 0.0]
   - boundary: outlet
     kind: pressure
+    source: analytic
     value: 0.0
 ```
 
@@ -72,21 +96,31 @@ migration, `no_slip` becomes a zero velocity vector.
 
 ## Forward inlet modes
 
-Set `inlet.source` to select how the forward inlet is defined:
+Exactly one velocity boundary condition must define an analytic profile or
+reference a file:
 
 | `source` | Required input | Behavior |
 | --- | --- | --- |
-| `analytic` (default) | `boundary`, `profile`; optional `normal`, `waveform`, `period` | Evaluates a theoretical spatial and temporal profile |
+| `analytic` | `boundary`, `kind: velocity`, `profile`; optional `normal`, `waveform`, `period` | Evaluates a theoretical spatial and temporal profile |
 | `file` | `boundary`, `path`; optional `normal` | Reads inlet-node vector velocities from HDF5 and extracts the case normal component |
 
 For example, read `inlet.h5` relative to the case file:
 
 ```yaml
-inlet:
-  source: file
-  boundary: inlet
-  path: inlet.h5
-  normal: auto
+boundary_conditions:
+  - boundary: inlet
+    kind: velocity
+    source: file
+    path: inlet.h5
+    normal: auto
+  - boundary: wall
+    kind: velocity
+    source: analytic
+    value: [0.0, 0.0]
+  - boundary: outlet
+    kind: pressure
+    source: analytic
+    value: 0.0
 ```
 
 The HDF5 file stores `velocity` with shape `(time, node, component)` and does

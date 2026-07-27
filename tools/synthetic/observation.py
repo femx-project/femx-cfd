@@ -8,6 +8,7 @@ import numpy as np
 from femx_cfd._typing import Config, Dynamic, OptionalProgress
 from femx_cfd.data import InletData, VelocityData
 from femx_cfd.models.navier_stokes.problem import make_problem
+from femx_cfd.models.navier_stokes.solver import select_solver
 from femx_cfd.prep.inlet import repeat_inlet
 
 
@@ -132,7 +133,15 @@ def solve_truth_observations(
 ) -> tuple[Dynamic, Dynamic, VelocityData]:
     """Solve the complete truth trajectory and sample velocity observations."""
     problem, parameters, cycles = _make_truth_problem(case, inlet)
-    solver = problem.create_solver(case["solver"]["backend"])
+    memory_space, solver_type = select_solver(
+        case["solver"].get("platform", "cpu"),
+        case["solver"]["backend"],
+    )
+    solver = problem.create_solver(
+        memory_space,
+        solver_type,
+        options=case["solver"].get("options"),
+    )
     truth = solver.solve(
         parameters,
         progress=progress,

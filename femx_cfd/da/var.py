@@ -7,6 +7,11 @@ import numpy as np
 from scipy.optimize import minimize
 
 from .._typing import Dynamic, OptionalProgress
+from ..models.navier_stokes.solver import (
+    platform_name,
+    select_solver,
+    solver_name,
+)
 
 
 def _weight(val: float, name: str) -> float:
@@ -55,7 +60,9 @@ class Var:
         *,
         reg: Dynamic = None,
         init_params: Dynamic = None,
-        backend: str = "dense",
+        platform: Dynamic = "cpu",
+        backend: Dynamic = "dense",
+        solver_options: Dynamic = None,
     ) -> None:
         if obs.op.model is not prob.model:
             raise ValueError("prob and obs must use the same model")
@@ -85,7 +92,13 @@ class Var:
             )
             self._obj.add(self._obs_obj)
             self._obj.add(reg)
-        self._reduced = prob.create_reduced(self._obj, backend)
+        memory_space, solver_type = select_solver(platform, backend)
+        self._reduced = prob.create_reduced(
+            self._obj,
+            memory_space,
+            solver_type,
+            options=solver_options,
+        )
 
     @property
     def prob(self) -> Dynamic:
@@ -117,7 +130,15 @@ class Var:
 
     @property
     def backend(self) -> str:
-        return self._reduced.backend
+        return solver_name(self._reduced.solver_type)
+
+    @property
+    def solver_type(self) -> str:
+        return solver_name(self._reduced.solver_type)
+
+    @property
+    def platform(self) -> str:
+        return platform_name(self._reduced.memspace)
 
     def value_grad(
         self,
@@ -226,7 +247,11 @@ class Var:
                     "message": "final forward solve",
                 }
             )
-        traj = self._prob.solve(params, backend=self._reduced.backend)
+        traj = self._prob.solve(
+            params,
+            self._reduced.memspace,
+            self._reduced.solver_type,
+        )
         pred = self._obs.op.predict(traj)
         obs_misfit = float(self._obs_obj.value(traj, params))
         reg = 0.0 if self._reg is None else float(self._reg.value(traj, params))

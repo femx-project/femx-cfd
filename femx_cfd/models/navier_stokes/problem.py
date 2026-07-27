@@ -52,14 +52,14 @@ def make_problem(
     """Build the Navier--Stokes model configured for an analysis case."""
 
     fluid = cfg["fluid"]
-    model = femx.NavierStokesModel(
+    model = femx.NavierModel(
         cfg["mesh"],
         num_steps(cfg),
         cfg["time"]["dt"],
         rho=fluid["rho"],
         mu=fluid["mu"],
     )
-    prob = femx.NavierStokesProblem(model)
+    prob = femx.NavierProblem(model)
     control = cfg["control"]
     add_bc(prob, cfg)
 

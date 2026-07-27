@@ -8,6 +8,8 @@ def fixed_conditions(case: Config, dimension: int) -> list[Config]:
 
     conditions = []
     for condition in case["boundary_conditions"]:
+        if "value" not in condition:
+            continue
         kind = condition["kind"]
         value = condition["value"]
         if kind == "velocity" and len(value) != dimension:

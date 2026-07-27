@@ -24,6 +24,7 @@ class ExampleRunnerTest(unittest.TestCase):
             for name, path in cases.items()
         }
         for document in documents.values():
+            self.assertEqual(document["solver"]["platform"], "cpu")
             self.assertEqual(document["solver"]["backend"], "petsc")
             self.assertEqual(
                 {condition["kind"] for condition in document["boundary_conditions"]},
@@ -32,14 +33,17 @@ class ExampleRunnerTest(unittest.TestCase):
 
         self.assertEqual(forward.format, "femx-cfd-forward")
         self.assertEqual(documents["forward"]["version"], 3)
+        self.assertEqual(forward.resolved["solver"]["platform"], "cpu")
         self.assertEqual(forward.resolved["solver"]["backend"], "petsc")
         self.assertEqual(documents["var"]["version"], 3)
         self.assertEqual(var.resolved["method"], "var")
         self.assertEqual(var.resolved["control"]["kind"], "vector")
+        self.assertEqual(var.resolved["solver"]["platform"], "cpu")
         self.assertEqual(var.resolved["solver"]["backend"], "petsc")
         self.assertEqual(documents["envar"]["version"], 3)
         self.assertEqual(envar.resolved["method"], "envar")
         self.assertEqual(envar.resolved["control"]["kind"], "vector")
+        self.assertEqual(envar.resolved["solver"]["platform"], "cpu")
         self.assertEqual(envar.resolved["solver"]["backend"], "petsc")
 
     def test_example_dispatches_through_the_generic_runner(self):

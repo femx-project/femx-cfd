@@ -18,23 +18,25 @@ time:
   end_time: 0.5
 
 solver:
+  platform: cpu
   backend: petsc
 
-inlet:
-  source: analytic
-  boundary: inlet
-  normal: auto
-  profile:
-    kind: uniform
-    value: 0.1
-  waveform:
-    kind: uniform
-    value: 1.0
-
 boundary_conditions:
+  - boundary: inlet
+    kind: velocity
+    source: analytic
+    normal: auto
+    profile:
+      kind: uniform
+      value: 0.1
+    waveform:
+      kind: uniform
+      value: 1.0
   - boundary: wall
     kind: velocity
+    source: analytic
     value: [0.0, 0.0]
   - boundary: outlet
     kind: pressure
+    source: analytic
     value: 0.0

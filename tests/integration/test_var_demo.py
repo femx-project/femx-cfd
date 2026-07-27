@@ -9,12 +9,12 @@ from tests.integration.rectangle_demo import make_problem, truth_parameter
 
 class RectangleVarDemoTest(unittest.TestCase):
     def test_reduces_objective_on_demo_mesh(self):
-        if "resolve" not in femx.solver_backends():
+        if femx.SolverType.RESOLVE not in femx.solver_types("host"):
             self.skipTest("femx was built without ReSolve")
 
         prob, op = make_problem()
         truth_param = truth_parameter(prob)
-        truth = prob.solve(truth_param, backend="resolve")
+        truth = prob.solve(truth_param, "host", "resolve")
         obs = femx.GaussianObservation(
             op,
             values=op.predict(truth),

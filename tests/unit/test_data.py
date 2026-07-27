@@ -210,7 +210,7 @@ class VelocityDataTest(unittest.TestCase):
 
     def test_creates_observation_directly_from_velocity(self):
         velocity = self.make_velocity()
-        model = femx.NavierStokesModel(
+        model = femx.NavierModel(
             MESH_FILE,
             num_steps=2,
             dt=0.5,
@@ -225,7 +225,7 @@ class VelocityDataTest(unittest.TestCase):
 
     def test_applies_relative_weights_per_observation_time(self):
         velocity = self.make_velocity()
-        model = femx.NavierStokesModel(
+        model = femx.NavierModel(
             MESH_FILE,
             num_steps=2,
             dt=0.5,
@@ -242,7 +242,7 @@ class VelocityDataTest(unittest.TestCase):
 
     def test_rejects_observation_time_weight_count_mismatch(self):
         velocity = self.make_velocity()
-        model = femx.NavierStokesModel(
+        model = femx.NavierModel(
             MESH_FILE,
             num_steps=2,
             dt=0.5,

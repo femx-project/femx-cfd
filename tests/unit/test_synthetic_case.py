@@ -92,6 +92,7 @@ class SyntheticConfigTest(unittest.TestCase):
         inlet = config["boundary_conditions"][0]
         self.assertEqual(inlet["direction"], "auto")
         self.assertEqual(inlet["profile"]["skew"], 0.0)
+        self.assertEqual(config["solver"]["platform"], "cpu")
         self.assertEqual(config["solver"]["backend"], "dense")
         self.assertEqual(config["observations"]["mask"], "none")
         self.assertEqual(config["observations"]["selected_phases"], [1, 2, 3, 4])
