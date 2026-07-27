@@ -57,12 +57,23 @@ def _migrate_v2_to_v3(
     case: Config,
     base_dir: Optional[PathLike] = None,
 ) -> Config:
-    """Adopt the output configuration while preserving earlier defaults."""
+    """Adopt unified boundaries and output while preserving earlier defaults."""
 
     del base_dir
     migrated = deepcopy(case)
     if "output" in migrated:
         raise ValueError("output requires case.version 3")
+    inlet = migrated.pop("inlet", None)
+    conditions = migrated.setdefault("boundary_conditions", [])
+    if isinstance(conditions, list):
+        for condition in conditions:
+            if isinstance(condition, dict):
+                condition.setdefault("source", "analytic")
+    if isinstance(inlet, dict):
+        condition = {"kind": "velocity", **inlet}
+        condition.setdefault("source", "analytic")
+        if isinstance(conditions, list):
+            conditions.insert(0, condition)
     migrated["version"] = 3
     return migrated
 

@@ -12,14 +12,14 @@ class VarTest(unittest.TestCase):
     @staticmethod
     def make_prob_and_obs():
         mesh_file = Path(__file__).resolve().parents[1] / "data" / "2d_tiny_tube.msh"
-        model = femx.NavierStokesModel(
+        model = femx.NavierModel(
             mesh_file,
             num_steps=3,
             dt=0.25,
             rho=1.0,
             mu=0.01,
         )
-        prob = femx.NavierStokesProblem(model)
+        prob = femx.NavierProblem(model)
         prob.add_bc(femx.DirichletBC("wall", "velocity", (0.0, 0.0)))
         prob.add_bc(femx.DirichletBC("outlet", "pressure", 0.0))
         prob.add_ctr(
@@ -43,14 +43,14 @@ class VarTest(unittest.TestCase):
     @staticmethod
     def make_prob_and_obs_with_init_mode(periodic=False):
         mesh_file = Path(__file__).resolve().parents[1] / "data" / "2d_tiny_tube.msh"
-        model = femx.NavierStokesModel(
+        model = femx.NavierModel(
             mesh_file,
             num_steps=3,
             dt=0.25,
             rho=1.0,
             mu=0.01,
         )
-        prob = femx.NavierStokesProblem(model)
+        prob = femx.NavierProblem(model)
         prob.add_bc(femx.DirichletBC("wall", "velocity", (0.0, 0.0)))
         prob.add_bc(femx.DirichletBC("outlet", "pressure", 0.0))
         prob.add_ctr(
@@ -175,12 +175,12 @@ class VarTest(unittest.TestCase):
         )
 
     def test_initial_mode_resolve_matches_dense(self):
-        if "resolve" not in femx.solver_backends():
+        if femx.SolverType.RESOLVE not in femx.solver_types("host"):
             self.skipTest("femx was built without ReSolve")
         self._assert_init_mode_backend_matches_dense("resolve")
 
     def test_initial_mode_petsc_matches_dense(self):
-        if "petsc" not in femx.solver_backends():
+        if femx.SolverType.PETSC not in femx.solver_types("host"):
             self.skipTest("femx was built without PETSc")
         self._assert_init_mode_backend_matches_dense("petsc")
 
@@ -252,6 +252,8 @@ class VarTest(unittest.TestCase):
         var = Var(prob, obs)
 
         self.assertEqual(var.backend, "dense")
+        self.assertEqual(var.solver_type, "dense")
+        self.assertEqual(var.platform, "cpu")
 
         res = var.solve(
             np.array([0.1, 0.2]),
@@ -278,7 +280,7 @@ class VarTest(unittest.TestCase):
         )
 
     def test_resolve_recovers_synthetic_ctr(self):
-        if "resolve" not in femx.solver_backends():
+        if femx.SolverType.RESOLVE not in femx.solver_types("host"):
             self.skipTest("femx was built without ReSolve")
 
         prob, obs, truth_param = self.make_prob_and_obs()
@@ -300,7 +302,7 @@ class VarTest(unittest.TestCase):
         self.assertLess(res.grad_norm, 1.0e-8)
 
     def test_petsc_recovers_synthetic_ctr(self):
-        if "petsc" not in femx.solver_backends():
+        if femx.SolverType.PETSC not in femx.solver_types("host"):
             self.skipTest("femx was built without PETSc")
 
         prob, obs, truth_param = self.make_prob_and_obs()
@@ -322,7 +324,7 @@ class VarTest(unittest.TestCase):
         self.assertLess(res.grad_norm, 1.0e-8)
 
     def test_tao_recovers_bounded_synthetic_ctr(self):
-        if "petsc" not in femx.solver_backends():
+        if femx.SolverType.PETSC not in femx.solver_types("host"):
             self.skipTest("femx was built without PETSc/TAO")
 
         prob, obs, truth_param = self.make_prob_and_obs()

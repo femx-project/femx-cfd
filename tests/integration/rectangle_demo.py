@@ -13,14 +13,14 @@ MESH = (
 
 
 def make_problem():
-    model = femx.NavierStokesModel(
+    model = femx.NavierModel(
         MESH,
         num_steps=1,
         dt=0.25,
         rho=1.0,
         mu=0.01,
     )
-    prob = femx.NavierStokesProblem(model)
+    prob = femx.NavierProblem(model)
     prob.add_bc(femx.DirichletBC("wall_top", "velocity", (0.0, 0.0)))
     prob.add_bc(femx.DirichletBC("wall_bottom", "velocity", (0.0, 0.0)))
     prob.add_bc(femx.DirichletBC("wall_right", "pressure", 0.0))

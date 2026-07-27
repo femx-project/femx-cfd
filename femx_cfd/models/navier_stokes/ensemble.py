@@ -12,6 +12,7 @@ from femx_cfd._typing import Config, Dynamic, OptionalProgress, ReportCallback
 from femx_cfd.data import make_velocity_obs
 
 from .problem import make_problem
+from .solver import select_solver
 
 
 @dataclass(frozen=True)
@@ -314,6 +315,18 @@ def _ensemble_workers(cfg: Config, report: ReportCallback) -> int:
     return workers
 
 
+def _create_solver(prob: Dynamic, cfg: Config) -> Dynamic:
+    memory_space, solver_type = select_solver(
+        cfg["solver"].get("platform", "cpu"),
+        cfg["solver"]["backend"],
+    )
+    return prob.create_solver(
+        memory_space,
+        solver_type,
+        options=cfg["solver"].get("options"),
+    )
+
+
 def _spinup_state(
     cfg: Config,
     inlet: Dynamic,
@@ -326,7 +339,7 @@ def _spinup_state(
         periodic=inlet.periodic,
         normal=getattr(inlet, "normal", None),
     )
-    solver = prob.create_solver(cfg["solver"]["backend"])
+    solver = _create_solver(prob, cfg)
     return solver.solve(params, progress=progress).values[-1]
 
 
@@ -353,7 +366,7 @@ def build_ensemble(
     workers = _ensemble_workers(cfg, report)
 
     if workers == 1:
-        solver = prob.create_solver(cfg["solver"]["backend"])
+        solver = _create_solver(prob, cfg)
         states = []
 
         for idx, (label, param) in enumerate(zip(labels, params), start=1):
@@ -404,7 +417,7 @@ def _obs_prediction(
         init_modes=spin.init_modes,
     )
     obs = make_velocity_obs(velocity, prob.model)
-    solver = prob.create_solver(cfg["solver"]["backend"])
+    solver = _create_solver(prob, cfg)
     traj = solver.solve(params, progress=progress)
     prediction = obs.op.predict(traj)
     if not capture_states:

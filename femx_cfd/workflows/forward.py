@@ -5,10 +5,14 @@ import femx
 import numpy as np
 
 from femx_cfd._typing import Config, Dynamic, OptionalProgress
-from femx_cfd.cases.forward import validate_forward_case
+from femx_cfd.cases.forward import (
+    inlet_boundary_condition,
+    validate_forward_case,
+)
 from femx_cfd.data import InletData, load_inlet
 from femx_cfd.mesh import mesh_in_meters
 from femx_cfd.models.navier_stokes.problem import make_problem
+from femx_cfd.models.navier_stokes.solver import select_solver
 from femx_cfd.prep.inlet import (
     analytic_inlet,
     inlet_normal,
@@ -30,7 +34,7 @@ class ForwardSolution:
 def _file_inlet(case: Config, normal: np.ndarray) -> InletData:
     """Load and normalize a prepared inlet for a forward time interval."""
 
-    options = case["inlet"]
+    options = inlet_boundary_condition(case)
     inlet = normal_inlet(
         load_inlet(options["path"]),
         normal,
@@ -85,7 +89,7 @@ def _file_inlet(case: Config, normal: np.ndarray) -> InletData:
 def _make_forward_problem(case: Config) -> tuple[Dynamic, np.ndarray]:
     with mesh_in_meters(case["mesh"]) as mesh_path:
         mesh = femx.Mesh.read(mesh_path)
-        inlet_options = case["inlet"]
+        inlet_options = inlet_boundary_condition(case)
         boundary = inlet_options["boundary"]
         surface = mesh.boundary(boundary)
         normal = inlet_normal(
@@ -146,14 +150,13 @@ def solve_forward(
 
     case = validate_forward_case(case)
     problem, parameters = _make_forward_problem(case)
-    backend = case["solver"]["backend"]
-    if backend not in femx.solver_backends():
-        available = ", ".join(femx.solver_backends())
-        raise ValueError(
-            f"solver backend '{backend}' is unavailable; available: {available}"
-        )
+    memory_space, solver_type = select_solver(
+        case["solver"]["platform"],
+        case["solver"]["backend"],
+    )
     solver = problem.create_solver(
-        backend,
+        memory_space,
+        solver_type,
         options=case["solver"].get("options"),
     )
     if progress is None:

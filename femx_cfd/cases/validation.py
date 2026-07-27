@@ -113,17 +113,24 @@ def validate_fluid(value: Dynamic) -> Config:
 
 def validate_solver(value: Dynamic) -> Config:
     solver = mapping({} if value is None else value, "solver")
-    reject_unknown(solver, {"backend", "petsc_options", "options"}, "solver")
+    reject_unknown(
+        solver,
+        {"platform", "backend", "petsc_options", "options"},
+        "solver",
+    )
+    platform = solver.get("platform", "cpu")
+    if platform not in ("cpu", "cuda"):
+        raise ValueError("solver.platform must be 'cpu' or 'cuda'")
     backend = solver.get("backend", "petsc")
-    if not isinstance(backend, str) or not backend:
-        raise ValueError("solver.backend must be a nonempty string")
+    if backend not in ("dense", "resolve", "petsc"):
+        raise ValueError("solver.backend must be 'dense', 'resolve', or 'petsc'")
     petsc_options = solver.get("petsc_options")
     if petsc_options is not None and not isinstance(petsc_options, str):
         raise ValueError("solver.petsc_options must be a string")
     options = solver.get("options")
     if options is not None and not isinstance(options, dict):
         raise ValueError("solver.options must be a mapping")
-    solver["backend"] = backend
+    solver.update({"platform": platform, "backend": backend})
     return solver
 
 
@@ -212,6 +219,46 @@ def validate_output(
     return validated
 
 
+def validate_fixed_boundary(condition: Dynamic, name: str) -> Config:
+    """Validate one uniform velocity or pressure boundary condition."""
+
+    condition = mapping(condition, name)
+    reject_unknown(condition, {"boundary", "kind", "source", "value"}, name)
+    boundary = condition.get("boundary")
+    if not isinstance(boundary, str) or not boundary:
+        raise ValueError(f"{name}.boundary must be a nonempty string")
+    source = condition.get("source")
+    if source is not None and source != "analytic":
+        raise ValueError(f"{name}.source must be 'analytic' for a fixed value")
+
+    kind = condition.get("kind")
+    if kind == "velocity":
+        try:
+            vector = np.asarray(condition.get("value"), dtype=float)
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                f"{name}.value must contain 2 or 3 finite values"
+            ) from error
+        if (
+            vector.ndim != 1
+            or vector.size not in (2, 3)
+            or not np.all(np.isfinite(vector))
+        ):
+            raise ValueError(f"{name}.value must contain 2 or 3 finite values")
+        condition["value"] = vector.tolist()
+        return condition
+    if kind == "pressure":
+        try:
+            number = float(condition.get("value"))
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"{name}.value must be finite") from error
+        if not np.isfinite(number):
+            raise ValueError(f"{name}.value must be finite")
+        condition["value"] = number
+        return condition
+    raise ValueError(f"{name}.kind must be 'velocity' or 'pressure'")
+
+
 def validate_fixed_boundaries(
     conditions: Dynamic,
     *,
@@ -222,57 +269,17 @@ def validate_fixed_boundaries(
 
     names = set()
     for index, condition in enumerate(conditions):
-        condition = mapping(condition, f"boundary_conditions[{index}]")
-        reject_unknown(
+        condition = validate_fixed_boundary(
             condition,
-            {"boundary", "kind", "value"},
             f"boundary_conditions[{index}]",
         )
-        boundary = condition.get("boundary")
-        if not isinstance(boundary, str) or not boundary:
-            raise ValueError(
-                f"boundary_conditions[{index}].boundary must be a nonempty string"
-            )
+        boundary = condition["boundary"]
         if boundary in excluded:
             raise ValueError(f"controlled boundary '{boundary}' must not also be fixed")
         if boundary in names:
             raise ValueError(f"duplicate boundary condition: {boundary}")
         names.add(boundary)
-
-        kind = condition.get("kind")
-        if kind == "velocity":
-            try:
-                vector = np.asarray(condition.get("value"), dtype=float)
-            except (TypeError, ValueError) as error:
-                raise ValueError(
-                    f"boundary_conditions[{index}].value must contain "
-                    "2 or 3 finite values"
-                ) from error
-            if (
-                vector.ndim != 1
-                or vector.size not in (2, 3)
-                or not np.all(np.isfinite(vector))
-            ):
-                raise ValueError(
-                    f"boundary_conditions[{index}].value must contain "
-                    "2 or 3 finite values"
-                )
-            condition["value"] = vector.tolist()
-            continue
-        if kind == "pressure":
-            try:
-                number = float(condition.get("value"))
-            except (TypeError, ValueError) as error:
-                raise ValueError(
-                    f"boundary_conditions[{index}].value must be finite"
-                ) from error
-            if not np.isfinite(number):
-                raise ValueError(f"boundary_conditions[{index}].value must be finite")
-            condition["value"] = number
-            continue
-        raise ValueError(
-            f"boundary_conditions[{index}].kind must be 'velocity' or 'pressure'"
-        )
+        conditions[index] = condition
     return conditions
 
 
@@ -287,6 +294,7 @@ __all__ = [
     "reject_unknown",
     "resolve_file",
     "validate_fixed_boundaries",
+    "validate_fixed_boundary",
     "validate_fluid",
     "validate_mesh",
     "validate_output",

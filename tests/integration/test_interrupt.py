@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class InterruptTest(unittest.TestCase):
     @unittest.skipUnless(
-        "petsc" in femx.solver_backends(),
+        femx.SolverType.PETSC in femx.solver_types("host"),
         "femx was built without PETSc/TAO",
     )
     def test_sigint_stops_tao(self):
@@ -27,7 +27,7 @@ class InterruptTest(unittest.TestCase):
             from tests.integration.rectangle_demo import make_problem, truth_parameter
 
             prob, op = make_problem()
-            truth = prob.solve(truth_parameter(prob), backend="petsc")
+            truth = prob.solve(truth_parameter(prob), "host", "petsc")
             obs = femx.GaussianObservation(op, values=op.predict(truth))
             var = Var(prob, obs, backend="petsc")
             print("ready", flush=True)

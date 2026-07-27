@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Updated the supported femx dependency range to `femx>=0.6.0,<0.7.0` and
+  migrated to its `MemorySpace` and shortened Navier Python APIs.
+- Renamed the portable solver execution selector from `device: host|device` to
+  `platform: cpu|cuda`.
+- Moved the forward inlet definition into `boundary_conditions` and require
+  every forward boundary to declare `source: analytic|file` explicitly.
+
 ## v0.4.0
 
 ### Added

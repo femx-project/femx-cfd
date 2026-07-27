@@ -8,11 +8,13 @@ from unittest import mock
 
 import numpy as np
 
+import femx
 import yaml
 
 from femx_cfd.cases.forward import (
     CASE_FORMAT,
     CASE_VERSION,
+    inlet_boundary_condition,
     validate_forward_case,
 )
 from femx_cfd.cases import load_case
@@ -31,14 +33,26 @@ def make_case(mesh="mesh.msh"):
         "mesh": str(mesh),
         "fluid": {"rho": 1.0, "mu": 0.01},
         "time": {"dt": 0.25, "end_time": 0.25},
-        "inlet": {
-            "boundary": "inlet",
-            "normal": "auto",
-            "profile": {"kind": "uniform", "value": 0.1},
-        },
         "boundary_conditions": [
-            {"boundary": "wall", "kind": "velocity", "value": [0.0, 0.0]},
-            {"boundary": "outlet", "kind": "pressure", "value": 0.0},
+            {
+                "boundary": "wall",
+                "kind": "velocity",
+                "source": "analytic",
+                "value": [0.0, 0.0],
+            },
+            {
+                "boundary": "outlet",
+                "kind": "pressure",
+                "source": "analytic",
+                "value": 0.0,
+            },
+            {
+                "boundary": "inlet",
+                "kind": "velocity",
+                "source": "analytic",
+                "normal": "auto",
+                "profile": {"kind": "uniform", "value": 0.1},
+            },
         ],
         "solver": {"backend": "dense"},
     }
@@ -62,6 +76,7 @@ class ForwardCaseTest(unittest.TestCase):
             {
                 "boundary": "wall",
                 "kind": "velocity",
+                "source": "analytic",
                 "value": [0.0, 0.0],
             },
         )
@@ -131,6 +146,7 @@ class ForwardCaseTest(unittest.TestCase):
         case["boundary_conditions"][0] = {
             "boundary": "wall",
             "kind": "no_slip",
+            "source": "analytic",
         }
 
         with self.assertRaisesRegex(ValueError, "velocity.*pressure"):
@@ -148,6 +164,13 @@ class ForwardCaseTest(unittest.TestCase):
         case["boundary_conditions"][1].pop("value")
 
         with self.assertRaisesRegex(ValueError, "value must be finite"):
+            validate_forward_case(case)
+
+    def test_requires_explicit_source_on_fixed_boundary(self):
+        case = make_case(MESH)
+        case["boundary_conditions"][0].pop("source")
+
+        with self.assertRaisesRegex(ValueError, "source must be.*analytic.*file"):
             validate_forward_case(case)
 
     def test_loads_mesh_relative_to_case_file_and_applies_defaults(self):
@@ -169,12 +192,35 @@ class ForwardCaseTest(unittest.TestCase):
                 "length_unit": "m",
             },
         )
-        self.assertEqual(case["inlet"]["period"], 0.25)
+        inlet = inlet_boundary_condition(case)
+        self.assertEqual(inlet["period"], 0.25)
         self.assertEqual(
-            case["inlet"]["waveform"],
+            inlet["waveform"],
             {"kind": "uniform", "value": 1.0},
         )
-        self.assertEqual(case["inlet"]["source"], "analytic")
+        self.assertEqual(inlet["source"], "analytic")
+        self.assertEqual(case["solver"]["platform"], "cpu")
+
+    def test_accepts_cuda_platform(self):
+        case = make_case(MESH)
+        case["solver"] = {
+            "platform": "cuda",
+            "backend": "resolve",
+        }
+
+        validated = validate_forward_case(case)
+
+        self.assertEqual(
+            validated["solver"],
+            {"platform": "cuda", "backend": "resolve"},
+        )
+
+    def test_rejects_unknown_platform(self):
+        case = make_case(MESH)
+        case["solver"]["platform"] = "accelerator"
+
+        with self.assertRaisesRegex(ValueError, "solver.platform"):
+            validate_forward_case(case)
 
     def test_loads_prepared_inlet_relative_to_case_file(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -183,9 +229,10 @@ class ForwardCaseTest(unittest.TestCase):
             inlet_path = directory / "inlet.h5"
             inlet_path.touch()
             document = make_case()
-            document["inlet"] = {
+            document["boundary_conditions"][2] = {
                 "source": "file",
                 "boundary": "inlet",
+                "kind": "velocity",
                 "path": "inlet.h5",
             }
             case_path = directory / "case.yaml"
@@ -193,12 +240,13 @@ class ForwardCaseTest(unittest.TestCase):
 
             case = load_case(case_path).resolved
 
-        self.assertEqual(case["inlet"]["source"], "file")
-        self.assertEqual(case["inlet"]["path"], str(inlet_path.resolve()))
+        inlet = inlet_boundary_condition(case)
+        self.assertEqual(inlet["source"], "file")
+        self.assertEqual(inlet["path"], str(inlet_path.resolve()))
 
     def test_rejects_unknown_inlet_source(self):
         case = make_case(MESH)
-        case["inlet"]["source"] = "measurement"
+        inlet_boundary_condition(case)["source"] = "measurement"
 
         with self.assertRaisesRegex(ValueError, "analytic.*file"):
             validate_forward_case(case)
@@ -208,6 +256,16 @@ class ForwardCaseTest(unittest.TestCase):
         case["obsolete"] = True
 
         with self.assertRaisesRegex(ValueError, "unknown options: obsolete"):
+            validate_forward_case(case)
+
+    def test_rejects_legacy_top_level_inlet_in_current_version(self):
+        case = make_case(MESH)
+        inlet = case["boundary_conditions"].pop()
+        inlet.pop("kind")
+        inlet.pop("source")
+        case["inlet"] = inlet
+
+        with self.assertRaisesRegex(ValueError, "unknown options: inlet"):
             validate_forward_case(case)
 
     def test_rejects_nonintegral_time_step_count(self):
@@ -272,16 +330,43 @@ class ForwardCaseTest(unittest.TestCase):
 
     def test_migrates_version_2_to_default_output(self):
         case = make_case(MESH)
+        inlet = case["boundary_conditions"].pop()
+        inlet.pop("kind")
+        inlet.pop("source")
+        case["inlet"] = inlet
+        for condition in case["boundary_conditions"]:
+            condition.pop("source")
         case["version"] = 2
 
         validated = validate_forward_case(case)
 
         self.assertEqual(validated["version"], 3)
         self.assertEqual(validated["output"], {"every": 1})
+        self.assertNotIn("inlet", validated)
+        self.assertTrue(
+            all(
+                condition["source"] == "analytic"
+                for condition in validated["boundary_conditions"]
+                if "value" in condition
+            )
+        )
+        self.assertEqual(
+            inlet_boundary_condition(validated),
+            {
+                "boundary": "inlet",
+                "kind": "velocity",
+                "source": "analytic",
+                "normal": "auto",
+                "period": 0.25,
+                "profile": {"kind": "uniform", "value": 0.1},
+                "waveform": {"kind": "uniform", "value": 1.0},
+            },
+        )
 
     def test_passes_named_options_to_the_selected_solver(self):
         case = make_case(MESH)
         case["solver"] = {
+            "platform": "cuda",
             "backend": "resolve",
             "options": {"solve": "fgmres", "rtol": 1.0e-9},
         }
@@ -295,14 +380,15 @@ class ForwardCaseTest(unittest.TestCase):
                 return_value=(problem, np.asarray([1.0])),
             ),
             mock.patch(
-                "femx_cfd.workflows.forward.femx.solver_backends",
-                return_value=("resolve",),
+                "femx_cfd.models.navier_stokes.solver.femx.solver_types",
+                return_value=(femx.SolverType.RESOLVE,),
             ),
         ):
             solution = solve_forward(case)
 
         problem.create_solver.assert_called_once_with(
-            "resolve",
+            femx.MemorySpace.DEVICE,
+            femx.SolverType.RESOLVE,
             options={"solve": "fgmres", "rtol": 1.0e-9},
         )
         self.assertIs(solution.trajectory, mock.sentinel.trajectory)
@@ -329,11 +415,14 @@ class ForwardCaseTest(unittest.TestCase):
             prepared = _file_inlet(
                 {
                     "time": {"dt": 0.25, "end_time": 1.0},
-                    "inlet": {
-                        "source": "file",
-                        "boundary": "inlet",
-                        "path": str(path),
-                    },
+                    "boundary_conditions": [
+                        {
+                            "source": "file",
+                            "boundary": "inlet",
+                            "kind": "velocity",
+                            "path": str(path),
+                        }
+                    ],
                 },
                 np.asarray([1.0, 0.0]),
             )
@@ -362,11 +451,14 @@ class ForwardCaseTest(unittest.TestCase):
                 _file_inlet(
                     {
                         "time": {"dt": 0.25, "end_time": 0.25},
-                        "inlet": {
-                            "source": "file",
-                            "boundary": "inlet",
-                            "path": str(path),
-                        },
+                        "boundary_conditions": [
+                            {
+                                "source": "file",
+                                "boundary": "inlet",
+                                "kind": "velocity",
+                                "path": str(path),
+                            }
+                        ],
                     },
                     np.asarray([1.0, 0.0]),
                 )

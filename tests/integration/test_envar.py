@@ -10,14 +10,14 @@ from femx_cfd.da.envar import _LinearProblem, _build_obs_basis
 class FemxControlledEnVarIntegrationTest(unittest.TestCase):
     def test_recovers_a_ctr_mode(self):
         mesh_file = Path(__file__).resolve().parents[1] / "data" / "2d_tiny_tube.msh"
-        model = femx.NavierStokesModel(
+        model = femx.NavierModel(
             mesh_file,
             num_steps=3,
             dt=0.25,
             rho=1.0,
             mu=0.01,
         )
-        prob = femx.NavierStokesProblem(model)
+        prob = femx.NavierProblem(model)
         prob.add_bc(femx.DirichletBC("wall", "velocity", (0.0, 0.0)))
         prob.add_bc(femx.DirichletBC("outlet", "pressure", 0.0))
         prob.add_ctr(

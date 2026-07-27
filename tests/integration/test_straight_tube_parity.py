@@ -9,11 +9,11 @@ from tests.integration.rectangle_demo import make_problem, truth_parameter
 
 class StraightTubeParityTest(unittest.TestCase):
     def test_demo_objective_and_gradient_are_stable(self):
-        if "petsc" not in femx.solver_backends():
+        if femx.SolverType.PETSC not in femx.solver_types("host"):
             self.skipTest("femx was built without PETSc")
 
         prob, op = make_problem()
-        truth = prob.solve(truth_parameter(prob), backend="petsc")
+        truth = prob.solve(truth_parameter(prob), "host", "petsc")
         obs = femx.GaussianObservation(
             op,
             values=op.predict(truth),

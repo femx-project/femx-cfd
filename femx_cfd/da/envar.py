@@ -8,6 +8,11 @@ import numpy as np
 from scipy.optimize import lsq_linear
 
 from .._typing import Dynamic, OptionalProgress
+from ..models.navier_stokes.solver import (
+    platform_name,
+    select_solver,
+    solver_name,
+)
 
 
 def _bound_val(val: Dynamic, default: float) -> float:
@@ -273,7 +278,9 @@ class EnVar:
         obs_basis: Dynamic = None,
         basis_forwards: int = 0,
         prior_weight: float = 1.0,
-        backend: str = "dense",
+        platform: Dynamic = "cpu",
+        backend: Dynamic = "dense",
+        solver_options: Dynamic = None,
     ) -> None:
         if not isinstance(param_basis, femx.EnsembleBasis):
             raise TypeError("param_basis must be an EnsembleBasis")
@@ -303,7 +310,12 @@ class EnVar:
         self._prior_weight = float(prior_weight)
         self._obs_basis = obs_basis
         self._basis_forwards = basis_forwards
-        self._solver = prob.create_solver(backend)
+        memory_space, solver_type = select_solver(platform, backend)
+        self._solver = prob.create_solver(
+            memory_space,
+            solver_type,
+            options=solver_options,
+        )
         self._obj = obs.objective(num_param=prob.num_param)
 
     @property
@@ -328,7 +340,15 @@ class EnVar:
 
     @property
     def backend(self) -> str:
-        return self._solver.backend
+        return solver_name(self._solver.solver_type)
+
+    @property
+    def solver_type(self) -> str:
+        return solver_name(self._solver.solver_type)
+
+    @property
+    def platform(self) -> str:
+        return platform_name(self._solver.memspace)
 
     @property
     def obs_obj(self) -> Dynamic:

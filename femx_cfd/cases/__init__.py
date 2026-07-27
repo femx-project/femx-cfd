@@ -11,7 +11,7 @@ from femx_cfd._typing import Config, PathLike
 
 from .forward import CASE_FORMAT as FORWARD_FORMAT
 from .forward import CASE_VERSION as FORWARD_VERSION
-from .forward import validate_forward_case
+from .forward import inlet_boundary_condition, validate_forward_case
 from .inverse import CASE_FORMAT as INVERSE_FORMAT
 from .inverse import CASE_VERSION as INVERSE_VERSION
 from .inverse import validate_inverse_case
@@ -84,9 +84,13 @@ def snapshot_case(case: LoadedCase, directory: PathLike) -> Config:
             document["mesh"] = relative
         else:
             document["mesh"]["path"] = relative
-        inlet = case.resolved["inlet"]
+        inlet = inlet_boundary_condition(case.resolved)
         if inlet["source"] == "file":
-            document["inlet"]["path"] = os.path.relpath(inlet["path"], target)
+            if case.source_version >= 3:
+                document_inlet = inlet_boundary_condition(document)
+            else:
+                document_inlet = document["inlet"]
+            document_inlet["path"] = os.path.relpath(inlet["path"], target)
     elif case.format == INVERSE_FORMAT:
         paths = (
             ("mesh", "path", case.resolved["mesh"]["path"]),

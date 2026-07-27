@@ -18,6 +18,7 @@ from femx_cfd.data import (
 )
 from femx_cfd.mesh import mesh_in_meters
 from femx_cfd.models import navier_stokes as ns
+from femx_cfd.models.navier_stokes.solver import select_solver
 from femx_cfd.prep.inlet import (
     inlet_normal,
     normal_inlet,
@@ -128,6 +129,10 @@ def _solve_var(
     prog: Progress,
 ) -> InverseSolution:
     backend = case["solver"]["backend"]
+    memory_space, solver_type = select_solver(
+        case["solver"]["platform"],
+        backend,
+    )
     prob_options = {
         "times": inlet.times,
         "periodic": inlet.periodic,
@@ -137,7 +142,11 @@ def _solve_var(
     prog.stage("spin-up: computing the initial velocity")
     spin_problem = ns.make_problem(case, **prob_options)
     background = inlet.params_for(spin_problem)
-    spin = spin_problem.create_solver(backend).solve(background, progress=prog)
+    spin = spin_problem.create_solver(
+        memory_space,
+        solver_type,
+        options=case["solver"].get("options"),
+    ).solve(background, progress=prog)
 
     prog.stage("input: loading prepared velocity observations")
     velocity = load_velocity(case["observations_path"])
@@ -167,7 +176,9 @@ def _solve_var(
         observation,
         reg=penalty.obj,
         init_params=background,
-        backend=backend,
+        platform=memory_space,
+        backend=solver_type,
+        solver_options=case["solver"].get("options"),
     )
     bounds = [tuple(options["control_bounds"])] * problem.num_param
     result = analysis.solve(
@@ -188,6 +199,7 @@ def _solve_var(
         },
         trajectory=result.traj,
         metrics={
+            "platform": case["solver"]["platform"],
             "backend": backend,
             "optimizer": options["optimizer"],
             "objective": result.obj,
@@ -270,7 +282,9 @@ def _solve_envar(
             obs_basis=observation_basis,
             basis_forwards=parameter_basis.num_coefficients + 1,
             prior_weight=options["prior_weight"],
+            platform=case["solver"]["platform"],
             backend=case["solver"]["backend"],
+            solver_options=case["solver"].get("options"),
         )
         result = analysis.solve(prog=_outer_progress(prog, label))
         outer_results.append(result)
@@ -299,6 +313,7 @@ def _solve_envar(
         },
         trajectory=result.traj,
         metrics={
+            "platform": case["solver"]["platform"],
             "backend": case["solver"]["backend"],
             "num_modes": problem.num_init_param,
             "linear_objective": result.obj,
@@ -335,12 +350,10 @@ def solve_inverse(case: Config, progress: Progress) -> InverseSolution:
     """Run the inverse method selected by one validated inverse case."""
 
     case = validate_inverse_case(case)
-    backend = case["solver"]["backend"]
-    if backend not in femx.solver_backends():
-        available = ", ".join(femx.solver_backends())
-        raise ValueError(
-            f"solver backend '{backend}' is unavailable; available: {available}"
-        )
+    select_solver(
+        case["solver"]["platform"],
+        case["solver"]["backend"],
+    )
 
     with mesh_in_meters(case["mesh"]) as mesh_path:
         mesh = femx.Mesh.read(mesh_path)
