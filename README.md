@@ -25,7 +25,7 @@ Install femx and femx-cfd:
 
 ```shell
 python -m pip install \
-  "femx @ git+https://github.com/femx-project/femx.git@v0.6.0"
+  "femx @ git+https://github.com/femx-project/femx.git@v0.7.0"
 python -m pip install -e .
 ```
 
