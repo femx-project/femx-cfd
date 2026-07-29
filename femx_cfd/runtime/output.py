@@ -137,6 +137,239 @@ def trajectory_levels(
     return np.arange(0, num_steps + 1, every, dtype=int)
 
 
+class ForwardStreamWriter:
+    """Write sampled forward states without retaining a complete trajectory."""
+
+    def __init__(self, output: PathLike) -> None:
+        self._output = Path(output)
+        self._partial_h5 = self._output / "flow.partial.h5"
+        self._final_h5 = self._output / "flow.h5"
+        self._h5: Optional[h5py.File] = None
+        self._model: Dynamic = None
+        self._steps: list[tuple[str, float]] = []
+        self._mesh_dimension = 0
+        self._num_nodes = 0
+        self._num_elements = 0
+        self._nodes_per_element = 0
+        self._last_level = -1
+
+    def _open(self, model: Dynamic) -> None:
+        mesh = model.mesh
+        coordinates = np.asarray(mesh.coordinates, dtype=float)
+        elements = np.asarray(mesh.elements, dtype=np.int32)
+        if coordinates.shape != (mesh.num_nodes, 3):
+            raise ValueError("mesh coordinates must have shape (num_nodes, 3)")
+        if (
+            elements.ndim != 2
+            or elements.shape[0] != mesh.num_elements
+            or elements.shape[1] == 0
+        ):
+            raise ValueError("mesh elements must have a uniform connectivity")
+
+        self._output.mkdir(parents=True, exist_ok=True)
+        self._h5 = h5py.File(self._partial_h5, "x")
+        self._model = model
+        self._mesh_dimension = int(mesh.dimension)
+        self._num_nodes = int(mesh.num_nodes)
+        self._num_elements = int(mesh.num_elements)
+        self._nodes_per_element = int(elements.shape[1])
+        self._h5.attrs["format"] = "femx-cfd-forward-stream"
+        self._h5.attrs["version"] = OUTPUT_VERSION
+        self._h5.attrs["complete"] = False
+        mesh_group = self._h5.create_group("mesh")
+        mesh_group.create_dataset("geometry", data=coordinates)
+        mesh_group.create_dataset("topology", data=elements)
+        self._h5.create_group("data")
+        self._h5.flush()
+
+    def append(self, model: Dynamic, level: int, state: Dynamic) -> None:
+        """Append one solver level to the partial HDF5 trajectory."""
+
+        level = int(level)
+        if level <= self._last_level:
+            raise ValueError("streamed solver levels must be strictly increasing")
+        if self._h5 is None:
+            self._open(model)
+        elif model is not self._model:
+            raise ValueError("streamed states must belong to one model")
+
+        velocity, pressure = model.state_fields(state)
+        velocity = np.asarray(velocity, dtype=float)
+        pressure = np.asarray(pressure, dtype=float)
+        if velocity.shape != (self._num_nodes, 3):
+            raise ValueError("velocity output has an inconsistent shape")
+        if pressure.shape != (self._num_nodes,):
+            raise ValueError("pressure output has an inconsistent shape")
+
+        name = f"step_{len(self._steps):06d}"
+        group = self._h5["data"].create_group(name)
+        group.attrs["solver_level"] = level
+        group.attrs["time"] = level * float(model.dt)
+        group.create_dataset("velocity", data=velocity)
+        group.create_dataset("pressure", data=pressure)
+        self._steps.append((name, level * float(model.dt)))
+        self._last_level = level
+        self._h5.attrs["last_solver_level"] = level
+        self._h5.flush()
+
+    def finish(self) -> None:
+        """Finalize HDF5 and XDMF output after a successful solve."""
+
+        if self._h5 is None or not self._steps:
+            raise RuntimeError("forward stream contains no output levels")
+        self._h5.attrs["complete"] = True
+        self._h5.flush()
+        self._h5.close()
+        self._h5 = None
+        os.replace(self._partial_h5, self._final_h5)
+        _write_stream_xdmf(
+            self._output / "flow.xdmf",
+            self._final_h5.name,
+            self._steps,
+            mesh_dimension=self._mesh_dimension,
+            num_nodes=self._num_nodes,
+            num_elements=self._num_elements,
+            nodes_per_element=self._nodes_per_element,
+        )
+
+    def abort(self) -> None:
+        """Close a failed stream while retaining its partial HDF5 file."""
+
+        if self._h5 is not None:
+            self._h5.flush()
+            self._h5.close()
+            self._h5 = None
+
+
+def _stream_topology_type(mesh_dimension: int, nodes_per_element: int) -> str:
+    if mesh_dimension == 2 and nodes_per_element == 3:
+        return "Triangle"
+    if mesh_dimension == 2 and nodes_per_element == 4:
+        return "Quadrilateral"
+    if mesh_dimension == 3 and nodes_per_element == 4:
+        return "Tetrahedron"
+    raise ValueError("streamed output has an unsupported mesh element type")
+
+
+def _write_stream_xdmf(
+    path: PathLike,
+    h5_name: str,
+    steps: list[tuple[str, float]],
+    *,
+    mesh_dimension: int,
+    num_nodes: int,
+    num_elements: int,
+    nodes_per_element: int,
+) -> None:
+    topology_type = _stream_topology_type(
+        mesh_dimension,
+        nodes_per_element,
+    )
+    root = ET.Element("Xdmf", Version="3.0")
+    domain = ET.SubElement(root, "Domain")
+    collection = ET.SubElement(
+        domain,
+        "Grid",
+        Name="time_series",
+        GridType="Collection",
+        CollectionType="Temporal",
+    )
+    for name, time in steps:
+        grid = ET.SubElement(
+            collection,
+            "Grid",
+            Name=name,
+            GridType="Uniform",
+        )
+        ET.SubElement(grid, "Time", Value=f"{time:.17g}")
+        topology = ET.SubElement(
+            grid,
+            "Topology",
+            TopologyType=topology_type,
+            NumberOfElements=str(num_elements),
+        )
+        topology_data = ET.SubElement(
+            topology,
+            "DataItem",
+            Dimensions=f"{num_elements} {nodes_per_element}",
+            NumberType="Int",
+            Precision="4",
+            Format="HDF",
+        )
+        topology_data.text = f"{h5_name}:/mesh/topology"
+        geometry = ET.SubElement(grid, "Geometry", GeometryType="XYZ")
+        geometry_data = ET.SubElement(
+            geometry,
+            "DataItem",
+            Dimensions=f"{num_nodes} 3",
+            NumberType="Float",
+            Precision="8",
+            Format="HDF",
+        )
+        geometry_data.text = f"{h5_name}:/mesh/geometry"
+        velocity = ET.SubElement(
+            grid,
+            "Attribute",
+            Name="velocity",
+            AttributeType="Vector",
+            Center="Node",
+        )
+        velocity_data = ET.SubElement(
+            velocity,
+            "DataItem",
+            Dimensions=f"{num_nodes} 3",
+            NumberType="Float",
+            Precision="8",
+            Format="HDF",
+        )
+        velocity_data.text = f"{h5_name}:/data/{name}/velocity"
+        pressure = ET.SubElement(
+            grid,
+            "Attribute",
+            Name="pressure",
+            AttributeType="Scalar",
+            Center="Node",
+        )
+        pressure_data = ET.SubElement(
+            pressure,
+            "DataItem",
+            Dimensions=str(num_nodes),
+            NumberType="Float",
+            Precision="8",
+            Format="HDF",
+        )
+        pressure_data.text = f"{h5_name}:/data/{name}/pressure"
+
+    ET.indent(root, space="  ")
+    with _atomic_path(path) as temporary:
+        ET.ElementTree(root).write(
+            temporary,
+            encoding="utf-8",
+            xml_declaration=True,
+        )
+
+
+def write_streamed_forward_result(
+    output: PathLike,
+    writer: ForwardStreamWriter,
+) -> None:
+    """Finalize a streamed forward trajectory and its result manifest."""
+
+    output = Path(output)
+    writer.finish()
+    write_json(
+        output / "result.json",
+        {
+            "format": FORWARD_RESULT_FORMAT,
+            "version": OUTPUT_VERSION,
+            "case": "case.yaml",
+            "flow": "flow.xdmf",
+            "data": "flow.h5",
+        },
+    )
+    write_status(output, "complete", result="result.json")
+
+
 def _copy_trajectory_levels(
     source_xdmf: PathLike,
     target_xdmf: PathLike,

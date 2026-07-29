@@ -164,3 +164,36 @@ def solve_forward(
     else:
         trajectory = solver.solve(parameters, progress=progress)
     return ForwardSolution(problem.model, trajectory)
+
+
+def stream_forward(
+    case: Config,
+    every: int,
+    sample: Dynamic = None,
+    progress: OptionalProgress = None,
+) -> Dynamic:
+    """Solve one case without retaining its complete trajectory."""
+
+    case = validate_forward_case(case)
+    problem, parameters = _make_forward_problem(case)
+    memory_space, solver_type = select_solver(
+        case["solver"]["platform"],
+        case["solver"]["backend"],
+    )
+    solver = problem.create_solver(
+        memory_space,
+        solver_type,
+        options=case["solver"].get("options"),
+    )
+    callback = (
+        None
+        if sample is None
+        else lambda level, state: sample(problem.model, level, state)
+    )
+    solver.run(
+        parameters,
+        sample_every=every,
+        sample=callback,
+        progress=progress,
+    )
+    return problem.model

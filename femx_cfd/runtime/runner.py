@@ -13,7 +13,7 @@ from femx_cfd.cases import (
     snapshot_case,
 )
 from femx_cfd.data import save_inlet
-from femx_cfd.workflows.forward import solve_forward
+from femx_cfd.workflows.forward import stream_forward
 from femx_cfd.workflows.inverse import solve_inverse
 
 from . import output, parallel, progress
@@ -52,16 +52,23 @@ def _run_forward(
     prog: Progress,
     runtime: parallel.Runtime,
 ) -> None:
-    prog.stage("forward: solving Navier-Stokes trajectory")
-    solution = solve_forward(case.resolved, progress=prog)
-    runtime.barrier()
-    if runtime.is_root:
-        prog.stage("output: writing flow.h5 and flow.xdmf")
-        output.write_forward_result(
-            destination,
-            solution,
+    prog.stage("forward: solving and streaming Navier-Stokes states")
+    writer = output.ForwardStreamWriter(destination) if runtime.is_root else None
+    try:
+        stream_forward(
+            case.resolved,
             every=case.resolved["output"]["every"],
+            sample=None if writer is None else writer.append,
+            progress=prog,
         )
+        runtime.barrier()
+        if writer is not None:
+            prog.stage("output: finalizing flow.h5 and flow.xdmf")
+            output.write_streamed_forward_result(destination, writer)
+    except Exception:
+        if writer is not None:
+            writer.abort()
+        raise
 
 
 def _run_inverse(

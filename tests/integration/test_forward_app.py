@@ -128,6 +128,15 @@ class ForwardApplicationTest(unittest.TestCase):
                     list(h5["data"]),
                     ["step_000000", "step_000001", "step_000002"],
                 )
+                self.assertTrue(bool(h5.attrs["complete"]))
+                self.assertEqual(
+                    [
+                        int(h5[f"data/step_{index:06d}"].attrs["solver_level"])
+                        for index in range(3)
+                    ],
+                    [0, 2, 4],
+                )
+            self.assertFalse((output / "flow.partial.h5").exists())
             times = [
                 float(item.attrib["Value"])
                 for item in ET.parse(output / "flow.xdmf").iter("Time")
