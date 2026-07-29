@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.5.2
+
+### Changed
+
+- Streamed forward output to HDF5 to reduce memory use.
+- Limited BLAS to one thread per PETSc MPI rank.
+
 ## v0.5.1
 
 ### Changed
