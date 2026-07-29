@@ -20,7 +20,11 @@ from femx_cfd.cases.forward import (
 from femx_cfd.cases import load_case
 from femx_cfd.cli import run_cli
 from femx_cfd.data import InletVelocityData, save_inlet
-from femx_cfd.workflows.forward import _file_inlet, solve_forward
+from femx_cfd.workflows.forward import (
+    _file_inlet,
+    solve_forward,
+    stream_forward,
+)
 
 
 MESH = Path(__file__).resolve().parents[1] / "data" / "2d_tiny_tube.msh"
@@ -392,6 +396,32 @@ class ForwardCaseTest(unittest.TestCase):
             options={"solve": "fgmres", "rtol": 1.0e-9},
         )
         self.assertIs(solution.trajectory, mock.sentinel.trajectory)
+
+    def test_streams_selected_levels_without_requesting_a_trajectory(self):
+        case = make_case(MESH)
+        problem = mock.Mock()
+        problem.model = mock.sentinel.model
+        solver = problem.create_solver.return_value
+        samples = mock.Mock()
+
+        with mock.patch(
+            "femx_cfd.workflows.forward._make_forward_problem",
+            return_value=(problem, np.asarray([1.0])),
+        ):
+            model = stream_forward(
+                case,
+                every=2,
+                sample=samples,
+            )
+
+        self.assertIs(model, mock.sentinel.model)
+        solver.run.assert_called_once()
+        self.assertEqual(solver.run.call_args.kwargs["sample_every"], 2)
+        callback = solver.run.call_args.kwargs["sample"]
+        state = np.asarray([3.0])
+        callback(4, state)
+        samples.assert_called_once_with(mock.sentinel.model, 4, state)
+        solver.solve.assert_not_called()
 
     def test_repeats_periodic_prepared_inlet_for_forward_interval(self):
         inlet = InletVelocityData(

@@ -38,6 +38,9 @@ class ParallelEnsembleTest(unittest.TestCase):
                 patch("femx_cfd.runtime.parallel.femx.petsc_finalize")
             )
             collect = stack.enter_context(patch("femx_cfd.runtime.parallel.gc.collect"))
+            limiter = stack.enter_context(
+                patch("femx_cfd.runtime.parallel.threadpool_limits")
+            )
             runtime = for_case({"solver": {"backend": "petsc"}})
             runtime.barrier()
             runtime.finalize()
@@ -47,6 +50,25 @@ class ParallelEnsembleTest(unittest.TestCase):
         barrier.assert_called_once_with()
         collect.assert_called_once_with()
         finalize.assert_called_once_with()
+        limiter.assert_called_once_with(limits=1, user_api="blas")
+        limiter.return_value.restore_original_limits.assert_called_once_with()
+
+    def test_serial_petsc_does_not_limit_blas_threads(self):
+        with (
+            patch(
+                "femx_cfd.runtime.parallel.femx.petsc_rank",
+                return_value=0,
+            ),
+            patch(
+                "femx_cfd.runtime.parallel.femx.petsc_size",
+                return_value=1,
+            ),
+            patch("femx_cfd.runtime.parallel.threadpool_limits") as limiter,
+        ):
+            runtime = for_case({"solver": {"backend": "petsc"}})
+
+        self.assertEqual(runtime, Runtime("petsc", rank=0, size=1))
+        limiter.assert_not_called()
 
     def test_collect_does_not_finalize_reusable_petsc(self):
         with (
