@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.5.3
+
+### Changed
+
+- Expanded the supported femx dependency range to `femx>=0.6.0,<0.9.0`,
+  adding support for femx v0.8.x.
+
 ## v0.5.2
 
 ### Changed
