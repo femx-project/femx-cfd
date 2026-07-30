@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "femx-cfd"
-version = "0.5.2"
+version = "0.5.3"
 description = "Python CFD forward, forecasting, and data-assimilation applications for femx."
 requires-python = ">=3.9"
 dependencies = [
-    "femx>=0.6.0,<0.8.0",
+    "femx>=0.6.0,<0.9.0",
     "gmsh>=4.11",
     "h5py>=3.8",
     "numpy>=1.23",
