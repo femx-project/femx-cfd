@@ -4,6 +4,9 @@ version: 3
 output:
   directory: result
   every: 1
+  wall_shear_stress:
+    boundary: wall
+    time_average: last_period
 
 mesh:
   path: mesh.msh

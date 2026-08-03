@@ -53,6 +53,9 @@ Version 3 cases can keep their result placement with the numerical settings:
 output:
   directory: runs/baseline
   every: 10
+  wall_shear_stress:
+    boundary: wall
+    time_average: last_period
 ```
 
 `directory` is relative to the case file and defaults to `result` beside that
@@ -65,6 +68,28 @@ This reduces stored trajectory data; it does not change the integration time
 step or the states held in memory by the solver. Inverse result HDF5 version 3
 records the selected indices and physical times as
 `estimate/state_levels` and `estimate/state_times`.
+
+For forward cases, optional `wall_shear_stress.boundary` must name a fixed
+zero-velocity boundary. The run writes both the directly evaluated,
+facet-centered WSS and a continuous P1 nodal field obtained by an L2 projection
+on the wall. Both vectors and magnitudes are stored in Pa in `flow.h5`, with a
+`wall_shear_stress.xdmf` view at the same levels selected by `every`. In
+ParaView, the direct fields are Cell Data and fields suffixed `_nodal` are Point
+Data. Normals point outward from the fluid, and the vector is the tangential
+wall-on-fluid traction.
+
+Set `wall_shear_stress.time_average` to `last_period` to also write
+`wall_shear_stress_statistics.xdmf`, a time-independent ParaView summary
+containing TAWSS as both Cell Data and Point Data. `last_period` uses the configured
+analytic-inlet period or the period stored in a periodic inlet HDF5 file.
+Use `full_run` for a nonperiodic run or when the entire simulated interval is
+the intended averaging window. The statistics use trapezoidal integration at
+every solver time level, independently of `output.every`:
+
+`TAWSS = (1/T) integral |WSS| dt`.
+
+Nodal TAWSS is integrated after projecting the instantaneous WSS at every
+solver level; it is not an average of the final cell TAWSS field.
 
 Use `femx-cfd inspect case.yaml` for a read-only summary of the resolved output
 directory, collision state, effective output interval and alignment, saved

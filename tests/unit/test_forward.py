@@ -20,6 +20,7 @@ from femx_cfd.cases.forward import (
 from femx_cfd.cases import load_case
 from femx_cfd.cli import run_cli
 from femx_cfd.data import InletVelocityData, save_inlet
+from femx_cfd.runtime.runner import _wall_shear_stress_statistics
 from femx_cfd.workflows.forward import (
     _file_inlet,
     solve_forward,
@@ -322,6 +323,98 @@ class ForwardCaseTest(unittest.TestCase):
         case["output"] = {"every": 2}
 
         with self.assertRaisesRegex(ValueError, "must divide"):
+            validate_forward_case(case)
+
+    def test_accepts_wall_shear_stress_on_a_no_slip_boundary(self):
+        case = make_case(MESH)
+        case["output"] = {
+            "wall_shear_stress": {"boundary": "wall"},
+        }
+
+        validated = validate_forward_case(case)
+
+        self.assertEqual(
+            validated["output"]["wall_shear_stress"],
+            {"boundary": "wall"},
+        )
+
+    def test_accepts_wall_shear_stress_time_average(self):
+        case = make_case(MESH)
+        case["output"] = {
+            "wall_shear_stress": {
+                "boundary": "wall",
+                "time_average": "last_period",
+            },
+        }
+
+        validated = validate_forward_case(case)
+
+        self.assertEqual(
+            validated["output"]["wall_shear_stress"],
+            {"boundary": "wall", "time_average": "last_period"},
+        )
+
+    def test_resolves_last_period_wall_shear_stress_window(self):
+        case = make_case(MESH)
+        case["time"]["end_time"] = 0.5
+        case["boundary_conditions"][-1]["period"] = 0.25
+        case["output"] = {
+            "wall_shear_stress": {
+                "boundary": "wall",
+                "time_average": "last_period",
+            },
+        }
+
+        validated = validate_forward_case(case)
+
+        self.assertEqual(
+            _wall_shear_stress_statistics(validated),
+            {
+                "time_average": "last_period",
+                "start_time": 0.25,
+                "end_time": 0.5,
+            },
+        )
+
+    def test_resolves_full_run_wall_shear_stress_window(self):
+        case = make_case(MESH)
+        case["output"] = {
+            "wall_shear_stress": {
+                "boundary": "wall",
+                "time_average": "full_run",
+            },
+        }
+
+        validated = validate_forward_case(case)
+
+        self.assertEqual(
+            _wall_shear_stress_statistics(validated),
+            {
+                "time_average": "full_run",
+                "start_time": 0.0,
+                "end_time": 0.25,
+            },
+        )
+
+    def test_rejects_invalid_wall_shear_stress_time_average(self):
+        case = make_case(MESH)
+        case["output"] = {
+            "wall_shear_stress": {
+                "boundary": "wall",
+                "time_average": "saved_levels",
+            },
+        }
+
+        with self.assertRaisesRegex(ValueError, "last_period.*full_run"):
+            validate_forward_case(case)
+
+    def test_rejects_wall_shear_stress_on_a_nonwall_boundary(self):
+        case = make_case(MESH)
+        case["output"] = {
+            "wall_shear_stress": {"boundary": "outlet"},
+        }
+
+        with self.assertRaisesRegex(ValueError, "zero-velocity boundary"):
             validate_forward_case(case)
 
     def test_requires_version_3_for_output_configuration(self):

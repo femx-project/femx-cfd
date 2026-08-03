@@ -4,7 +4,9 @@ import os
 from pathlib import Path
 from typing import Optional, Union
 
-from femx_cfd._typing import PathLike, Progress
+import numpy as np
+
+from femx_cfd._typing import Config, Dynamic, PathLike, Progress
 from femx_cfd.cases import (
     FORWARD_FORMAT,
     INVERSE_FORMAT,
@@ -12,7 +14,8 @@ from femx_cfd.cases import (
     load_case,
     snapshot_case,
 )
-from femx_cfd.data import save_inlet
+from femx_cfd.cases.forward import inlet_boundary_condition
+from femx_cfd.data import load_inlet, save_inlet
 from femx_cfd.workflows.forward import stream_forward
 from femx_cfd.workflows.inverse import solve_inverse
 
@@ -46,6 +49,52 @@ def _progress_sink(kind: str, enabled: bool) -> Progress:
     raise ValueError("progress must be 'console' or 'json'")
 
 
+def _wall_shear_stress_statistics(case: Config) -> Dynamic:
+    options = case["output"].get("wall_shear_stress")
+    if options is None or "time_average" not in options:
+        return None
+
+    time_average = options["time_average"]
+    end_time = float(case["time"]["end_time"])
+    if time_average == "full_run":
+        start_time = 0.0
+    else:
+        inlet_options = inlet_boundary_condition(case)
+        if inlet_options["source"] == "analytic":
+            period = float(inlet_options["period"])
+        else:
+            inlet = load_inlet(inlet_options["path"])
+            if not inlet.periodic:
+                raise ValueError(
+                    "wall_shear_stress.time_average 'last_period' requires "
+                    "a periodic inlet"
+                )
+            if not np.isclose(inlet.times[0], 0.0):
+                raise ValueError("periodic inlet HDF5 times must start at zero")
+            period = float(inlet.times[-1])
+            if period <= 0.0:
+                raise ValueError("periodic inlet HDF5 must contain a positive duration")
+        cycles = int(round(end_time / period))
+        if cycles <= 0 or not np.isclose(
+            cycles * period,
+            end_time,
+            rtol=0.0,
+            atol=1.0e-10,
+        ):
+            raise ValueError(
+                "time.end_time must be an integer multiple of the inlet period"
+            )
+        start_time = end_time - period
+        if np.isclose(start_time, 0.0, rtol=0.0, atol=1.0e-10):
+            start_time = 0.0
+
+    return {
+        "time_average": time_average,
+        "start_time": start_time,
+        "end_time": end_time,
+    }
+
+
 def _run_forward(
     case: LoadedCase,
     destination: Path,
@@ -53,12 +102,25 @@ def _run_forward(
     runtime: parallel.Runtime,
 ) -> None:
     prog.stage("forward: solving and streaming Navier-Stokes states")
-    writer = output.ForwardStreamWriter(destination) if runtime.is_root else None
+    wall_shear_stress = case.resolved["output"].get("wall_shear_stress")
+    requires_every_step = (
+        wall_shear_stress is not None and "time_average" in wall_shear_stress
+    )
+    writer = (
+        output.ForwardStreamWriter(
+            destination,
+            every=case.resolved["output"]["every"],
+            wall_shear_stress=wall_shear_stress,
+            wall_shear_stress_statistics=_wall_shear_stress_statistics(case.resolved),
+        )
+        if runtime.is_root
+        else None
+    )
     try:
         stream_forward(
             case.resolved,
-            every=case.resolved["output"]["every"],
-            sample=None if writer is None else writer.append,
+            every=1 if requires_every_step else case.resolved["output"]["every"],
+            sample=None if writer is None else writer.sample,
             progress=prog,
         )
         runtime.barrier()

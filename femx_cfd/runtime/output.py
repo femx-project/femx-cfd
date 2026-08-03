@@ -19,6 +19,10 @@ import yaml
 
 from femx_cfd._typing import Config, Dynamic, PathLike
 from femx_cfd.data import VelocityData
+from femx_cfd.models.navier_stokes.wss import (
+    WallShearStressEvaluator,
+    WallShearStressTimeAverage,
+)
 
 
 FORWARD_STATUS_FORMAT = "femx-cfd-forward-status"
@@ -140,7 +144,18 @@ def trajectory_levels(
 class ForwardStreamWriter:
     """Write sampled forward states without retaining a complete trajectory."""
 
-    def __init__(self, output: PathLike) -> None:
+    def __init__(
+        self,
+        output: PathLike,
+        *,
+        every: int = 1,
+        wall_shear_stress: Dynamic = None,
+        wall_shear_stress_statistics: Dynamic = None,
+    ) -> None:
+        if isinstance(every, bool) or not isinstance(every, int) or every <= 0:
+            raise ValueError("output.every must be a positive integer")
+        if wall_shear_stress_statistics is not None and wall_shear_stress is None:
+            raise ValueError("WSS statistics require wall shear stress output")
         self._output = Path(output)
         self._partial_h5 = self._output / "flow.partial.h5"
         self._final_h5 = self._output / "flow.h5"
@@ -152,6 +167,35 @@ class ForwardStreamWriter:
         self._num_elements = 0
         self._nodes_per_element = 0
         self._last_level = -1
+        self._last_observed_level = -1
+        self._every = every
+        self._wall_shear_stress_options = wall_shear_stress
+        self._wall_shear_stress: Optional[WallShearStressEvaluator] = None
+        self._wall_shear_stress_statistics_options = wall_shear_stress_statistics
+        self._wall_shear_stress_time_average: Optional[WallShearStressTimeAverage] = (
+            None
+        )
+        self._wall_shear_stress_nodal_time_average: Optional[
+            WallShearStressTimeAverage
+        ] = None
+
+    @property
+    def has_wall_shear_stress(self) -> bool:
+        """Return whether this stream includes wall shear stress."""
+
+        return self._wall_shear_stress_options is not None
+
+    @property
+    def has_wall_shear_stress_statistics(self) -> bool:
+        """Return whether this stream includes TAWSS."""
+
+        return self._wall_shear_stress_statistics_options is not None
+
+    @property
+    def requires_every_step(self) -> bool:
+        """Return whether the callback must observe every solver level."""
+
+        return self.has_wall_shear_stress_statistics
 
     def _open(self, model: Dynamic) -> None:
         mesh = model.mesh
@@ -180,7 +224,89 @@ class ForwardStreamWriter:
         mesh_group.create_dataset("geometry", data=coordinates)
         mesh_group.create_dataset("topology", data=elements)
         self._h5.create_group("data")
+        if self._wall_shear_stress_options is not None:
+            boundary = self._wall_shear_stress_options["boundary"]
+            self._wall_shear_stress = WallShearStressEvaluator(
+                mesh,
+                boundary,
+                model.mu,
+            )
+            wall = self._h5.create_group("wall_shear_stress")
+            wall.attrs["boundary"] = boundary
+            wall.attrs["dynamic_viscosity"] = float(model.mu)
+            wall.attrs["units"] = "Pa"
+            wall.attrs["location"] = "boundary_facet_center"
+            wall.attrs["nodal_location"] = "boundary_node"
+            wall.attrs["nodal_projection"] = "continuous_P1_L2"
+            wall.attrs["normal_convention"] = "outward_from_fluid"
+            wall.attrs["traction_convention"] = "wall_on_fluid"
+            wall_mesh = wall.create_group("mesh")
+            wall_mesh.create_dataset(
+                "geometry",
+                data=self._wall_shear_stress.coordinates,
+            )
+            wall_mesh.create_dataset(
+                "topology",
+                data=self._wall_shear_stress.elements,
+            )
+            wall_mesh.create_dataset(
+                "mesh_node_ids",
+                data=self._wall_shear_stress.mesh_node_ids,
+            )
+            wall_mesh.create_dataset(
+                "adjacent_cells",
+                data=self._wall_shear_stress.adjacent_cells,
+            )
+            wall_mesh.create_dataset(
+                "normal",
+                data=self._wall_shear_stress.normals,
+            )
+            wall.create_group("data")
+            if self._wall_shear_stress_statistics_options is not None:
+                options = self._wall_shear_stress_statistics_options
+                self._wall_shear_stress_time_average = WallShearStressTimeAverage(
+                    self._wall_shear_stress.elements.shape[0],
+                    options["start_time"],
+                    options["end_time"],
+                )
+                self._wall_shear_stress_nodal_time_average = WallShearStressTimeAverage(
+                    self._wall_shear_stress.coordinates.shape[0],
+                    options["start_time"],
+                    options["end_time"],
+                )
         self._h5.flush()
+
+    def sample(self, model: Dynamic, level: int, state: Dynamic) -> None:
+        """Observe one solver level and persist it when selected by ``every``."""
+
+        level = int(level)
+        if level <= self._last_observed_level:
+            raise ValueError("observed solver levels must be strictly increasing")
+        if self._h5 is None:
+            self._open(model)
+        elif model is not self._model:
+            raise ValueError("streamed states must belong to one model")
+
+        if self._wall_shear_stress_time_average is not None:
+            velocity, _ = model.state_fields(state)
+            velocity = np.asarray(velocity, dtype=float)
+            if velocity.shape != (self._num_nodes, 3):
+                raise ValueError("velocity output has an inconsistent shape")
+            assert self._wall_shear_stress is not None
+            facet_values = self._wall_shear_stress.evaluate(velocity)
+            self._wall_shear_stress_time_average.add(
+                level * float(model.dt),
+                facet_values,
+            )
+            assert self._wall_shear_stress_nodal_time_average is not None
+            self._wall_shear_stress_nodal_time_average.add(
+                level * float(model.dt),
+                self._wall_shear_stress.project_to_nodes(facet_values),
+            )
+
+        if level % self._every == 0:
+            self.append(model, level, state)
+        self._last_observed_level = level
 
     def append(self, model: Dynamic, level: int, state: Dynamic) -> None:
         """Append one solver level to the partial HDF5 trajectory."""
@@ -207,6 +333,29 @@ class ForwardStreamWriter:
         group.attrs["time"] = level * float(model.dt)
         group.create_dataset("velocity", data=velocity)
         group.create_dataset("pressure", data=pressure)
+        if self._wall_shear_stress is not None:
+            values = self._wall_shear_stress.evaluate(velocity)
+            nodal_values = self._wall_shear_stress.project_to_nodes(values)
+            wall_group = self._h5["wall_shear_stress/data"].create_group(name)
+            wall_group.attrs["solver_level"] = level
+            wall_group.attrs["time"] = level * float(model.dt)
+            vector = wall_group.create_dataset("vector", data=values)
+            vector.attrs["units"] = "Pa"
+            magnitude = wall_group.create_dataset(
+                "magnitude",
+                data=np.linalg.norm(values, axis=1),
+            )
+            magnitude.attrs["units"] = "Pa"
+            nodal_vector = wall_group.create_dataset(
+                "nodal_vector",
+                data=nodal_values,
+            )
+            nodal_vector.attrs["units"] = "Pa"
+            nodal_magnitude = wall_group.create_dataset(
+                "nodal_magnitude",
+                data=np.linalg.norm(nodal_values, axis=1),
+            )
+            nodal_magnitude.attrs["units"] = "Pa"
         self._steps.append((name, level * float(model.dt)))
         self._last_level = level
         self._h5.attrs["last_solver_level"] = level
@@ -217,6 +366,28 @@ class ForwardStreamWriter:
 
         if self._h5 is None or not self._steps:
             raise RuntimeError("forward stream contains no output levels")
+        if self._wall_shear_stress_time_average is not None:
+            values = self._wall_shear_stress_time_average.finish()
+            assert self._wall_shear_stress_nodal_time_average is not None
+            nodal_values = self._wall_shear_stress_nodal_time_average.finish()
+            options = self._wall_shear_stress_statistics_options
+            statistics = self._h5["wall_shear_stress"].create_group("statistics")
+            statistics.attrs["time_average"] = options["time_average"]
+            statistics.attrs["start_time"] = options["start_time"]
+            statistics.attrs["end_time"] = options["end_time"]
+            statistics.attrs["duration"] = options["end_time"] - options["start_time"]
+            statistics.attrs["integration"] = "trapezoidal"
+            statistics.attrs["source"] = "all_solver_levels"
+            statistics.attrs["nodal_source"] = (
+                "instantaneous_P1_L2_projection_at_all_solver_levels"
+            )
+            tawss = statistics.create_dataset("tawss", data=values)
+            tawss.attrs["units"] = "Pa"
+            nodal_tawss = statistics.create_dataset(
+                "nodal_tawss",
+                data=nodal_values,
+            )
+            nodal_tawss.attrs["units"] = "Pa"
         self._h5.attrs["complete"] = True
         self._h5.flush()
         self._h5.close()
@@ -231,6 +402,23 @@ class ForwardStreamWriter:
             num_elements=self._num_elements,
             nodes_per_element=self._nodes_per_element,
         )
+        if self._wall_shear_stress is not None:
+            _write_wall_shear_stress_xdmf(
+                self._output / "wall_shear_stress.xdmf",
+                self._final_h5.name,
+                self._steps,
+                num_nodes=self._wall_shear_stress.coordinates.shape[0],
+                num_elements=self._wall_shear_stress.elements.shape[0],
+                nodes_per_element=self._wall_shear_stress.elements.shape[1],
+            )
+            if self.has_wall_shear_stress_statistics:
+                _write_wall_shear_stress_statistics_xdmf(
+                    self._output / "wall_shear_stress_statistics.xdmf",
+                    self._final_h5.name,
+                    num_nodes=self._wall_shear_stress.coordinates.shape[0],
+                    num_elements=self._wall_shear_stress.elements.shape[0],
+                    nodes_per_element=self._wall_shear_stress.elements.shape[1],
+                )
 
     def abort(self) -> None:
         """Close a failed stream while retaining its partial HDF5 file."""
@@ -349,6 +537,230 @@ def _write_stream_xdmf(
         )
 
 
+def _wall_topology_type(nodes_per_element: int) -> str:
+    if nodes_per_element == 2:
+        return "Polyline"
+    if nodes_per_element == 3:
+        return "Triangle"
+    raise ValueError("wall output has an unsupported facet type")
+
+
+def _write_wall_shear_stress_xdmf(
+    path: PathLike,
+    h5_name: str,
+    steps: list[tuple[str, float]],
+    *,
+    num_nodes: int,
+    num_elements: int,
+    nodes_per_element: int,
+) -> None:
+    topology_type = _wall_topology_type(nodes_per_element)
+
+    root = ET.Element("Xdmf", Version="3.0")
+    domain = ET.SubElement(root, "Domain")
+    collection = ET.SubElement(
+        domain,
+        "Grid",
+        Name="wall_shear_stress",
+        GridType="Collection",
+        CollectionType="Temporal",
+    )
+    for name, time in steps:
+        grid = ET.SubElement(
+            collection,
+            "Grid",
+            Name=name,
+            GridType="Uniform",
+        )
+        ET.SubElement(grid, "Time", Value=f"{time:.17g}")
+        topology = ET.SubElement(
+            grid,
+            "Topology",
+            TopologyType=topology_type,
+            NumberOfElements=str(num_elements),
+        )
+        if nodes_per_element == 2:
+            topology.set("NodesPerElement", "2")
+        topology_data = ET.SubElement(
+            topology,
+            "DataItem",
+            Dimensions=f"{num_elements} {nodes_per_element}",
+            NumberType="Int",
+            Precision="4",
+            Format="HDF",
+        )
+        topology_data.text = f"{h5_name}:/wall_shear_stress/mesh/topology"
+        geometry = ET.SubElement(grid, "Geometry", GeometryType="XYZ")
+        geometry_data = ET.SubElement(
+            geometry,
+            "DataItem",
+            Dimensions=f"{num_nodes} 3",
+            NumberType="Float",
+            Precision="8",
+            Format="HDF",
+        )
+        geometry_data.text = f"{h5_name}:/wall_shear_stress/mesh/geometry"
+
+        for attribute_name, dataset, attribute_type, dimensions, center in (
+            (
+                "wall_shear_stress",
+                "vector",
+                "Vector",
+                f"{num_elements} 3",
+                "Cell",
+            ),
+            (
+                "wall_shear_stress_magnitude",
+                "magnitude",
+                "Scalar",
+                str(num_elements),
+                "Cell",
+            ),
+            (
+                "wall_shear_stress_nodal",
+                "nodal_vector",
+                "Vector",
+                f"{num_nodes} 3",
+                "Node",
+            ),
+            (
+                "wall_shear_stress_magnitude_nodal",
+                "nodal_magnitude",
+                "Scalar",
+                str(num_nodes),
+                "Node",
+            ),
+            (
+                "wall_normal",
+                "normal",
+                "Vector",
+                f"{num_elements} 3",
+                "Cell",
+            ),
+        ):
+            attribute = ET.SubElement(
+                grid,
+                "Attribute",
+                Name=attribute_name,
+                AttributeType=attribute_type,
+                Center=center,
+            )
+            data = ET.SubElement(
+                attribute,
+                "DataItem",
+                Dimensions=dimensions,
+                NumberType="Float",
+                Precision="8",
+                Format="HDF",
+            )
+            if dataset == "normal":
+                data.text = f"{h5_name}:/wall_shear_stress/mesh/normal"
+            else:
+                data.text = f"{h5_name}:/wall_shear_stress/data/{name}/{dataset}"
+
+    ET.indent(root, space="  ")
+    with _atomic_path(path) as temporary:
+        ET.ElementTree(root).write(
+            temporary,
+            encoding="utf-8",
+            xml_declaration=True,
+        )
+
+
+def _write_wall_shear_stress_statistics_xdmf(
+    path: PathLike,
+    h5_name: str,
+    *,
+    num_nodes: int,
+    num_elements: int,
+    nodes_per_element: int,
+) -> None:
+    topology_type = _wall_topology_type(nodes_per_element)
+    root = ET.Element("Xdmf", Version="3.0")
+    domain = ET.SubElement(root, "Domain")
+    grid = ET.SubElement(
+        domain,
+        "Grid",
+        Name="wall_shear_stress_statistics",
+        GridType="Uniform",
+    )
+    topology = ET.SubElement(
+        grid,
+        "Topology",
+        TopologyType=topology_type,
+        NumberOfElements=str(num_elements),
+    )
+    if nodes_per_element == 2:
+        topology.set("NodesPerElement", "2")
+    topology_data = ET.SubElement(
+        topology,
+        "DataItem",
+        Dimensions=f"{num_elements} {nodes_per_element}",
+        NumberType="Int",
+        Precision="4",
+        Format="HDF",
+    )
+    topology_data.text = f"{h5_name}:/wall_shear_stress/mesh/topology"
+    geometry = ET.SubElement(grid, "Geometry", GeometryType="XYZ")
+    geometry_data = ET.SubElement(
+        geometry,
+        "DataItem",
+        Dimensions=f"{num_nodes} 3",
+        NumberType="Float",
+        Precision="8",
+        Format="HDF",
+    )
+    geometry_data.text = f"{h5_name}:/wall_shear_stress/mesh/geometry"
+
+    for attribute_name, dataset, attribute_type, dimensions, center in (
+        (
+            "TAWSS",
+            "statistics/tawss",
+            "Scalar",
+            str(num_elements),
+            "Cell",
+        ),
+        (
+            "TAWSS_nodal",
+            "statistics/nodal_tawss",
+            "Scalar",
+            str(num_nodes),
+            "Node",
+        ),
+        (
+            "wall_normal",
+            "mesh/normal",
+            "Vector",
+            f"{num_elements} 3",
+            "Cell",
+        ),
+    ):
+        attribute = ET.SubElement(
+            grid,
+            "Attribute",
+            Name=attribute_name,
+            AttributeType=attribute_type,
+            Center=center,
+        )
+        data = ET.SubElement(
+            attribute,
+            "DataItem",
+            Dimensions=dimensions,
+            NumberType="Float",
+            Precision="8",
+            Format="HDF",
+        )
+        data.text = f"{h5_name}:/wall_shear_stress/{dataset}"
+
+    ET.indent(root, space="  ")
+    with _atomic_path(path) as temporary:
+        ET.ElementTree(root).write(
+            temporary,
+            encoding="utf-8",
+            xml_declaration=True,
+        )
+
+
 def write_streamed_forward_result(
     output: PathLike,
     writer: ForwardStreamWriter,
@@ -357,15 +769,20 @@ def write_streamed_forward_result(
 
     output = Path(output)
     writer.finish()
+    result = {
+        "format": FORWARD_RESULT_FORMAT,
+        "version": OUTPUT_VERSION,
+        "case": "case.yaml",
+        "flow": "flow.xdmf",
+        "data": "flow.h5",
+    }
+    if writer.has_wall_shear_stress:
+        result["wall_shear_stress"] = "wall_shear_stress.xdmf"
+    if writer.has_wall_shear_stress_statistics:
+        result["wall_shear_stress_statistics"] = "wall_shear_stress_statistics.xdmf"
     write_json(
         output / "result.json",
-        {
-            "format": FORWARD_RESULT_FORMAT,
-            "version": OUTPUT_VERSION,
-            "case": "case.yaml",
-            "flow": "flow.xdmf",
-            "data": "flow.h5",
-        },
+        result,
     )
     write_status(output, "complete", result="result.json")
 
