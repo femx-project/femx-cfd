@@ -26,6 +26,64 @@ CASE_FORMAT = "femx-cfd-forward"
 CASE_VERSION = 3
 
 
+def _validate_output(
+    value: Dynamic,
+    base_dir: Optional[PathLike],
+    *,
+    num_steps: int,
+    boundary_conditions: list[Config],
+) -> Config:
+    output = mapping({} if value is None else value, "output")
+    reject_unknown(
+        output,
+        {"directory", "every", "wall_shear_stress"},
+        "output",
+    )
+    common = {
+        name: option
+        for name, option in output.items()
+        if name in {"directory", "every"}
+    }
+    validated = validate_output(common, base_dir, num_steps=num_steps)
+
+    if "wall_shear_stress" not in output:
+        return validated
+    options = mapping(output["wall_shear_stress"], "output.wall_shear_stress")
+    reject_unknown(
+        options,
+        {"boundary", "time_average"},
+        "output.wall_shear_stress",
+    )
+    boundary = options.get("boundary")
+    if not isinstance(boundary, str) or not boundary:
+        raise ValueError("output.wall_shear_stress.boundary must be a nonempty string")
+    matches = [
+        condition
+        for condition in boundary_conditions
+        if condition["boundary"] == boundary
+    ]
+    if (
+        len(matches) != 1
+        or matches[0].get("kind") != "velocity"
+        or "value" not in matches[0]
+        or np.any(np.asarray(matches[0]["value"], dtype=float) != 0.0)
+    ):
+        raise ValueError(
+            "output.wall_shear_stress.boundary must name a fixed zero-velocity boundary"
+        )
+    wall_shear_stress = {"boundary": boundary}
+    if "time_average" in options:
+        time_average = options["time_average"]
+        if time_average not in ("last_period", "full_run"):
+            raise ValueError(
+                "output.wall_shear_stress.time_average must be "
+                "'last_period' or 'full_run'"
+            )
+        wall_shear_stress["time_average"] = time_average
+    validated["wall_shear_stress"] = wall_shear_stress
+    return validated
+
+
 def _validate_inlet_condition(
     condition: Config,
     name: str,
@@ -92,9 +150,7 @@ def _validate_inlet_condition(
     ratio = end_time / period
     cycles = int(round(ratio))
     if cycles <= 0 or not np.isclose(ratio, cycles, rtol=0.0, atol=1.0e-10):
-        raise ValueError(
-            f"time.end_time must be an integer multiple of {name}.period"
-        )
+        raise ValueError(f"time.end_time must be an integer multiple of {name}.period")
 
     condition["period"] = period
     condition["waveform"] = waveform
@@ -201,10 +257,11 @@ def validate_forward_case(
     )
 
     case["solver"] = validate_solver(case.get("solver"))
-    case["output"] = validate_output(
+    case["output"] = _validate_output(
         case.get("output"),
         base_dir,
         num_steps=steps,
+        boundary_conditions=case["boundary_conditions"],
     )
     return case
 

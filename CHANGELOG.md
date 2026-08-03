@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Added optional wall shear stress output for forward cases as both direct
+  facet-centered fields and continuous P1 nodal L2 projections, including
+  all-step trapezoidal TAWSS over the last inlet period or full run.
+
 ## v0.5.4
 
 ### Changed

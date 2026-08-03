@@ -88,7 +88,14 @@ class ForwardApplicationTest(unittest.TestCase):
             case = {
                 "format": CASE_FORMAT,
                 "version": CASE_VERSION,
-                "output": {"directory": "runs/thinned", "every": 2},
+                "output": {
+                    "directory": "runs/thinned",
+                    "every": 2,
+                    "wall_shear_stress": {
+                        "boundary": "wall",
+                        "time_average": "last_period",
+                    },
+                },
                 "mesh": {"path": "mesh.msh", "length_unit": "mm"},
                 "fluid": {"rho": 1.0, "mu": 0.01},
                 "time": {"dt": 0.25, "end_time": 1.0},
@@ -99,6 +106,7 @@ class ForwardApplicationTest(unittest.TestCase):
                         "source": "analytic",
                         "normal": "auto",
                         "profile": {"kind": "uniform", "value": 0.1},
+                        "period": 0.5,
                     },
                     {
                         "boundary": "wall",
@@ -123,6 +131,8 @@ class ForwardApplicationTest(unittest.TestCase):
 
             output = directory / "runs/thinned"
             self.assertEqual(code, 0)
+            self.assertTrue((output / "wall_shear_stress.xdmf").is_file())
+            self.assertTrue((output / "wall_shear_stress_statistics.xdmf").is_file())
             with h5py.File(output / "flow.h5") as h5:
                 self.assertEqual(
                     list(h5["data"]),
@@ -136,12 +146,77 @@ class ForwardApplicationTest(unittest.TestCase):
                     ],
                     [0, 2, 4],
                 )
+                self.assertEqual(
+                    h5["wall_shear_stress"].attrs["boundary"],
+                    "wall",
+                )
+                self.assertEqual(
+                    list(h5["wall_shear_stress/data"]),
+                    ["step_000000", "step_000001", "step_000002"],
+                )
+                wall = h5["wall_shear_stress/data/step_000002"]
+                self.assertEqual(wall["vector"].shape[1], 3)
+                np.testing.assert_allclose(
+                    wall["magnitude"][...],
+                    np.linalg.norm(wall["vector"][...], axis=1),
+                )
+                self.assertEqual(wall["nodal_vector"].shape[1], 3)
+                self.assertEqual(
+                    wall["nodal_vector"].shape[0],
+                    h5["wall_shear_stress/mesh/geometry"].shape[0],
+                )
+                np.testing.assert_allclose(
+                    wall["nodal_magnitude"][...],
+                    np.linalg.norm(wall["nodal_vector"][...], axis=1),
+                )
+                statistics = h5["wall_shear_stress/statistics"]
+                self.assertEqual(
+                    set(statistics),
+                    {"tawss", "nodal_tawss"},
+                )
+                self.assertEqual(statistics.attrs["time_average"], "last_period")
+                self.assertEqual(statistics.attrs["source"], "all_solver_levels")
+                self.assertAlmostEqual(statistics.attrs["start_time"], 0.5)
+                self.assertAlmostEqual(statistics.attrs["end_time"], 1.0)
+                self.assertTrue(np.all(statistics["tawss"][...] >= 0.0))
+                self.assertEqual(
+                    statistics["nodal_tawss"].shape,
+                    wall["nodal_magnitude"].shape,
+                )
+                self.assertTrue(np.all(statistics["nodal_tawss"][...] >= 0.0))
             self.assertFalse((output / "flow.partial.h5").exists())
             times = [
                 float(item.attrib["Value"])
                 for item in ET.parse(output / "flow.xdmf").iter("Time")
             ]
             np.testing.assert_allclose(times, [0.0, 0.5, 1.0])
+            result = json.loads((output / "result.json").read_text())
+            self.assertEqual(
+                result["wall_shear_stress_statistics"],
+                "wall_shear_stress_statistics.xdmf",
+            )
+            attributes = {
+                item.attrib["Name"]
+                for item in ET.parse(output / "wall_shear_stress_statistics.xdmf").iter(
+                    "Attribute"
+                )
+            }
+            self.assertEqual(
+                attributes,
+                {
+                    "TAWSS",
+                    "TAWSS_nodal",
+                    "wall_normal",
+                },
+            )
+            centers = {
+                item.attrib["Name"]: item.attrib["Center"]
+                for item in ET.parse(output / "wall_shear_stress.xdmf").iter(
+                    "Attribute"
+                )
+            }
+            self.assertEqual(centers["wall_shear_stress"], "Cell")
+            self.assertEqual(centers["wall_shear_stress_nodal"], "Node")
 
     def test_runs_with_prepared_inlet_hdf5(self):
         with tempfile.TemporaryDirectory() as directory:
