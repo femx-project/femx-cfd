@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.6.1
+
+### Changed
+
+- Expanded `femx-cfd inspect` with explicit hydraulic-diameter, maximum and
+  mean Reynolds-number estimates, and a maximum inlet CFL estimate.
+
 ## v0.6.0
 
 ### Added
