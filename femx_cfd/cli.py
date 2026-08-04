@@ -159,14 +159,20 @@ def run_cli(argv: Optional[Sequence[str]] = None) -> int:
             ("output interval", f"{report['output_interval']:.6g} s"),
             ("output alignment", "exact"),
             ("output levels", report["output_levels"]),
-            ("peak inlet speed", f"{report['peak_inlet_speed']:.6g} m/s"),
+            ("Maximum inlet speed", f"{report['peak_inlet_speed']:.6g} m/s"),
             (
-                "inlet length",
+                "Estimated hydraulic diameter",
                 f"{report['inlet_characteristic_length']:.6g} m",
             ),
-            ("inlet min edge", f"{report['inlet_min_edge']:.6g} m"),
-            ("Reynolds estimate", f"{report['reynolds']:.6g}"),
-            ("inlet CFL estimate", f"{report['cfl']:.6g}"),
+            (
+                "Estimated maximum Reynolds number",
+                f"{report['reynolds']:.6g}",
+            ),
+            (
+                "Estimated mean Reynolds number",
+                f"{report['mean_reynolds']:.6g}",
+            ),
+            ("Estimated maximum inlet CFL", f"{report['cfl']:.6g}"),
         )
         width = max(len(label) for label, _ in rows)
         for label, value in rows:

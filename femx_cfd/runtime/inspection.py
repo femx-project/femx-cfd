@@ -19,6 +19,32 @@ from .output import result_directory_state, trajectory_levels
 from .runner import result_path
 
 
+def _surface_element_measures(surface: object) -> np.ndarray:
+    """Return the length or area of every inlet boundary element."""
+
+    coordinates = np.asarray(surface.coordinates, dtype=float)
+    elements = np.asarray(surface.elements, dtype=int)
+    if elements.ndim != 2 or elements.size == 0:
+        raise ValueError("inlet boundary has no elements")
+
+    if int(surface.dimension) == 1:
+        return np.linalg.norm(
+            coordinates[elements[:, 1]] - coordinates[elements[:, 0]],
+            axis=1,
+        )
+
+    measures = np.zeros(elements.shape[0], dtype=float)
+    for element_index, element in enumerate(elements):
+        origin = coordinates[int(element[0])]
+        for index in range(1, element.size - 1):
+            first = coordinates[int(element[index])] - origin
+            second = coordinates[int(element[index + 1])] - origin
+            measures[element_index] += 0.5 * float(
+                np.linalg.norm(np.cross(first, second))
+            )
+    return measures
+
+
 def _surface_scales(surface: object) -> tuple[float, float]:
     coordinates = np.asarray(surface.coordinates, dtype=float)
     elements = np.asarray(surface.elements, dtype=int)
@@ -50,13 +76,7 @@ def _surface_scales(surface: object) -> tuple[float, float]:
     if int(surface.dimension) == 1:
         characteristic_length = sum(positive_edges)
     else:
-        area = 0.0
-        for element in elements:
-            origin = coordinates[int(element[0])]
-            for index in range(1, element.size - 1):
-                first = coordinates[int(element[index])] - origin
-                second = coordinates[int(element[index + 1])] - origin
-                area += 0.5 * float(np.linalg.norm(np.cross(first, second)))
+        area = float(np.sum(_surface_element_measures(surface)))
         perimeter = sum(
             edge_lengths[edge] for edge, count in edge_counts.items() if count == 1
         )
@@ -70,7 +90,51 @@ def _surface_scales(surface: object) -> tuple[float, float]:
     return characteristic_length, min_edge
 
 
-def _peak_inlet_speed(case: Config, mesh: object) -> tuple[float, object]:
+def _mean_bulk_speed(
+    surface: object,
+    node_ids: np.ndarray,
+    values: np.ndarray,
+    times: np.ndarray,
+) -> float:
+    """Return the time mean of the area-averaged normal inlet speed."""
+
+    surface_node_ids = np.asarray(surface.mesh_node_ids, dtype=np.int64)
+    node_index = {int(node_id): index for index, node_id in enumerate(surface_node_ids)}
+    try:
+        columns = np.asarray(
+            [node_index[int(node_id)] for node_id in node_ids],
+            dtype=np.int64,
+        )
+    except KeyError as error:
+        raise ValueError("inlet values reference a node outside the inlet") from error
+
+    values = np.asarray(values, dtype=float)
+    nodal_values = np.zeros((values.shape[0], surface_node_ids.size), dtype=float)
+    nodal_values[:, columns] = values
+
+    elements = np.asarray(surface.elements, dtype=int)
+    measures = _surface_element_measures(surface)
+    total_measure = float(np.sum(measures))
+    if total_measure <= 0.0:
+        raise ValueError("inlet boundary has no positive measure")
+    element_values = np.mean(nodal_values[:, elements], axis=2)
+    bulk_velocity = element_values @ measures / total_measure
+    speeds = np.abs(bulk_velocity)
+    times = np.asarray(times, dtype=float)
+    if speeds.size != times.size:
+        raise ValueError("inlet velocity and times have incompatible lengths")
+    if speeds.size == 1:
+        return float(speeds[0])
+
+    intervals = np.diff(times)
+    duration = float(times[-1] - times[0])
+    if duration <= 0.0 or np.any(intervals <= 0.0):
+        raise ValueError("inlet times must be increasing")
+    integral = np.sum(0.5 * (speeds[:-1] + speeds[1:]) * intervals)
+    return float(integral / duration)
+
+
+def _inlet_speeds(case: Config, mesh: object) -> tuple[float, float, object]:
     if case["format"] == FORWARD_FORMAT:
         inlet_options = inlet_boundary_condition(case)
         surface = mesh.boundary(inlet_options["boundary"])
@@ -86,13 +150,32 @@ def _peak_inlet_speed(case: Config, mesh: object) -> tuple[float, object]:
                 space=inlet_options["profile"],
                 time=inlet_options["waveform"],
             )
-        speed = float(np.max(np.abs(inlet.vals)))
-        return speed, surface
+        maximum_speed = float(np.max(np.abs(inlet.vals)))
+        mean_speed = _mean_bulk_speed(
+            surface,
+            inlet.node_ids,
+            inlet.vals,
+            inlet.times,
+        )
+        return maximum_speed, mean_speed, surface
 
     _, velocity = _initial_inlet(case, mesh)
     surface = mesh.boundary(case["control"]["boundary"])
-    speed = float(np.max(np.linalg.norm(velocity.vals, axis=-1)))
-    return speed, surface
+    normal_value = (
+        case["control"].get("normal", "auto")
+        if case["control"]["kind"] == "normal"
+        else "auto"
+    )
+    normal = inlet_normal(mesh, surface, normal_value)
+    normal_values = np.einsum("tnd,d->tn", velocity.vals, normal)
+    maximum_speed = float(np.max(np.linalg.norm(velocity.vals, axis=-1)))
+    mean_speed = _mean_bulk_speed(
+        surface,
+        velocity.node_ids,
+        normal_values,
+        velocity.times,
+    )
+    return maximum_speed, mean_speed, surface
 
 
 def _inspect_loaded_case(
@@ -110,10 +193,14 @@ def _inspect_loaded_case(
 
     with mesh_in_meters(resolved["mesh"]) as mesh_path:
         mesh = femx.Mesh.read(mesh_path)
-        peak_speed, inlet = _peak_inlet_speed(resolved, mesh)
+        maximum_speed, mean_speed, inlet = _inlet_speeds(resolved, mesh)
         characteristic_length, min_edge = _surface_scales(inlet)
         mesh_nodes = int(mesh.num_nodes)
         mesh_elements = int(mesh.num_elements)
+
+    reynolds_scale = (
+        resolved["fluid"]["rho"] * characteristic_length / resolved["fluid"]["mu"]
+    )
 
     return {
         "case": str(case.path),
@@ -130,16 +217,13 @@ def _inspect_loaded_case(
         "output_interval": resolved["output"]["every"] * dt,
         "output_aligned": True,
         "output_levels": int(levels.size),
-        "peak_inlet_speed": peak_speed,
+        "peak_inlet_speed": maximum_speed,
+        "mean_inlet_speed": mean_speed,
         "inlet_characteristic_length": characteristic_length,
         "inlet_min_edge": min_edge,
-        "reynolds": (
-            resolved["fluid"]["rho"]
-            * peak_speed
-            * characteristic_length
-            / resolved["fluid"]["mu"]
-        ),
-        "cfl": peak_speed * dt / min_edge,
+        "reynolds": reynolds_scale * maximum_speed,
+        "mean_reynolds": reynolds_scale * mean_speed,
+        "cfl": maximum_speed * dt / min_edge,
     }
 
 

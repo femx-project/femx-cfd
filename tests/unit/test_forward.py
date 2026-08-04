@@ -141,8 +141,11 @@ class ForwardCaseTest(unittest.TestCase):
         self.assertIn("output every", report)
         self.assertIn("output interval", report)
         self.assertIn("output alignment", report)
-        self.assertIn("Reynolds estimate", report)
-        self.assertIn("inlet CFL estimate", report)
+        self.assertIn("Maximum inlet speed", report)
+        self.assertIn("Estimated hydraulic diameter", report)
+        self.assertIn("Estimated maximum Reynolds number", report)
+        self.assertIn("Estimated mean Reynolds number", report)
+        self.assertIn("Estimated maximum inlet CFL", report)
         self.assertEqual(occupied_code, 1)
         self.assertIn("occupied", occupied_stdout.getvalue())
 
