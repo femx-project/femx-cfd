@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 from dataclasses import dataclass
+import json
 import os
 from pathlib import Path
 
@@ -46,7 +47,11 @@ def load_case(path: PathLike) -> LoadedCase:
     case_path = Path(path).expanduser().resolve()
     if not case_path.is_file():
         raise ValueError(f"case does not exist: {case_path}")
-    document = yaml.safe_load(case_path.read_text(encoding="utf-8"))
+    text = case_path.read_text(encoding="utf-8")
+    try:
+        document = json.loads(text)
+    except json.JSONDecodeError:
+        document = yaml.safe_load(text)
     if not isinstance(document, dict):
         raise ValueError("case root must be a mapping")
 
