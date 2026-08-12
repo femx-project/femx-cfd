@@ -1,5 +1,6 @@
 import contextlib
 import io
+import json
 import shutil
 import tempfile
 import unittest
@@ -221,6 +222,25 @@ class ForwardCaseTest(unittest.TestCase):
         self.assertEqual(
             validated["solver"],
             {"platform": "cuda", "backend": "resolve"},
+        )
+
+    def test_loads_json_exponent_as_numeric_solver_option(self):
+        case = make_case(MESH)
+        case["solver"] = {
+            "platform": "cuda",
+            "backend": "resolve",
+            "options": {"rtol": 1.0e-8},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            case_path = Path(directory) / "case.yaml"
+            case_path.write_text(json.dumps(case), encoding="utf-8")
+
+            loaded = load_case(case_path)
+
+        self.assertEqual(loaded.resolved["solver"]["options"]["rtol"], 1.0e-8)
+        self.assertIsInstance(
+            loaded.resolved["solver"]["options"]["rtol"],
+            float,
         )
 
     def test_rejects_unknown_platform(self):

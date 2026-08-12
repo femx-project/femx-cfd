@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.6.2
+
+### Fixed
+
+- Fixed loading JSON-formatted case documents so scientific-notation solver
+  options remain numeric.
+
 ## v0.6.1
 
 ### Changed
