@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.6.3
+
+### Changed
+
+- Updated the supported femx dependency range to `femx>=0.9.1,<0.10.0` and
+  the setup instructions to use femx v0.9.1.
+
 ## v0.6.2
 
 ### Fixed
