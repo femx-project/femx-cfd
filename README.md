@@ -1,7 +1,7 @@
 # femx-cfd
 
-Python applications for computational fluid dynamics (CFD) forward simulation,
-data assimilation, and inverse analysis, built on
+Python applications for computational fluid dynamics (CFD), including forward
+simulation and data assimilation, built on
 [femx](https://github.com/femx-project/femx).
 
 ## Setup
@@ -25,7 +25,7 @@ Install femx and femx-cfd:
 
 ```shell
 python -m pip install \
-  "femx @ git+https://github.com/femx-project/femx.git@v0.9.0"
+  "femx @ git+https://github.com/femx-project/femx.git@v0.9.1"
 python -m pip install -e .
 ```
 
