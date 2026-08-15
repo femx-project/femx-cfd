@@ -95,6 +95,30 @@ def _wall_shear_stress_statistics(case: Config) -> Dynamic:
     }
 
 
+def _linear_system_collector(case: LoadedCase, destination: Path) -> Dynamic:
+    if not case.resolved["output"].get("linear_systems"):
+        return None
+    try:
+        from femx_ml.collect import LinearSystemCollector
+    except ModuleNotFoundError as error:
+        if error.name == "femx_ml":
+            raise RuntimeError(
+                "linear-system output requires the optional femx-ml package"
+            ) from error
+        raise
+
+    solver = case.resolved["solver"]
+    return LinearSystemCollector(
+        destination / "linear_systems.h5",
+        metadata={
+            "case_format": case.format,
+            "case_version": case.version,
+            "solver_platform": solver["platform"],
+            "solver_backend": solver["backend"],
+        },
+    )
+
+
 def _run_forward(
     case: LoadedCase,
     destination: Path,
@@ -116,18 +140,28 @@ def _run_forward(
         if runtime.is_root
         else None
     )
+    collector = _linear_system_collector(case, destination)
     try:
         stream_forward(
             case.resolved,
             every=1 if requires_every_step else case.resolved["output"]["every"],
             sample=None if writer is None else writer.sample,
             progress=prog,
+            linear_system_observer=collector,
         )
         runtime.barrier()
+        if collector is not None:
+            collector.close()
         if writer is not None:
             prog.stage("output: finalizing flow.h5 and flow.xdmf")
-            output.write_streamed_forward_result(destination, writer)
+            output.write_streamed_forward_result(
+                destination,
+                writer,
+                linear_systems=collector is not None,
+            )
     except Exception:
+        if collector is not None:
+            collector.abort()
         if writer is not None:
             writer.abort()
         raise

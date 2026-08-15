@@ -764,6 +764,8 @@ def _write_wall_shear_stress_statistics_xdmf(
 def write_streamed_forward_result(
     output: PathLike,
     writer: ForwardStreamWriter,
+    *,
+    linear_systems: bool = False,
 ) -> None:
     """Finalize a streamed forward trajectory and its result manifest."""
 
@@ -780,6 +782,8 @@ def write_streamed_forward_result(
         result["wall_shear_stress"] = "wall_shear_stress.xdmf"
     if writer.has_wall_shear_stress_statistics:
         result["wall_shear_stress_statistics"] = "wall_shear_stress_statistics.xdmf"
+    if linear_systems:
+        result["linear_systems"] = "linear_systems.h5"
     write_json(
         output / "result.json",
         result,

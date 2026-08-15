@@ -53,6 +53,7 @@ Version 3 cases can keep their result placement with the numerical settings:
 output:
   directory: runs/baseline
   every: 10
+  linear_systems: true
   wall_shear_stress:
     boundary: wall
     time_average: last_period
@@ -68,6 +69,11 @@ This reduces stored trajectory data; it does not change the integration time
 step or the states held in memory by the solver. Inverse result HDF5 version 3
 records the selected indices and physical times as
 `estimate/state_levels` and `estimate/state_times`.
+
+For forward cases using a CPU dense or ReSolve solver, set
+`linear_systems: true` to write `linear_systems.h5` through the optional
+`femx-ml` package. The file contains each completed Host linear system and is
+listed in `result.json`.
 
 For forward cases, optional `wall_shear_stress.boundary` must name a fixed
 zero-velocity boundary. The run writes both the directly evaluated,
