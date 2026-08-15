@@ -36,7 +36,7 @@ def _validate_output(
     output = mapping({} if value is None else value, "output")
     reject_unknown(
         output,
-        {"directory", "every", "wall_shear_stress"},
+        {"directory", "every", "linear_systems", "wall_shear_stress"},
         "output",
     )
     common = {
@@ -45,6 +45,12 @@ def _validate_output(
         if name in {"directory", "every"}
     }
     validated = validate_output(common, base_dir, num_steps=num_steps)
+
+    linear_systems = output.get("linear_systems", False)
+    if not isinstance(linear_systems, bool):
+        raise ValueError("output.linear_systems must be a boolean")
+    if linear_systems:
+        validated["linear_systems"] = True
 
     if "wall_shear_stress" not in output:
         return validated
@@ -263,6 +269,13 @@ def validate_forward_case(
         num_steps=steps,
         boundary_conditions=case["boundary_conditions"],
     )
+    if case["output"].get("linear_systems") and (
+        case["solver"]["platform"] != "cpu"
+        or case["solver"]["backend"] not in ("dense", "resolve")
+    ):
+        raise ValueError(
+            "output.linear_systems requires a CPU dense or ReSolve solver"
+        )
     return case
 
 

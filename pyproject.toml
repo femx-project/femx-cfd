@@ -21,6 +21,9 @@ dependencies = [
 femx-cfd = "femx_cfd.cli:main"
 
 [project.optional-dependencies]
+ml = [
+    "femx-ml>=0.1,<0.2",
+]
 lint = [
     "ruff==0.15.22",
 ]

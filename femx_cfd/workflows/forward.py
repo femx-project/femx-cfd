@@ -145,6 +145,7 @@ def _make_forward_problem(case: Config) -> tuple[Dynamic, np.ndarray]:
 def solve_forward(
     case: Config,
     progress: OptionalProgress = None,
+    linear_system_observer: Dynamic = None,
 ) -> ForwardSolution:
     """Solve one validated case and return its complete trajectory."""
 
@@ -154,11 +155,12 @@ def solve_forward(
         case["solver"]["platform"],
         case["solver"]["backend"],
     )
-    solver = problem.create_solver(
-        memory_space,
-        solver_type,
-        options=case["solver"].get("options"),
-    )
+    solver_options = {
+        "options": case["solver"].get("options"),
+    }
+    if linear_system_observer is not None:
+        solver_options["linear_system_observer"] = linear_system_observer
+    solver = problem.create_solver(memory_space, solver_type, **solver_options)
     if progress is None:
         trajectory = solver.solve(parameters)
     else:
@@ -171,6 +173,7 @@ def stream_forward(
     every: int,
     sample: Dynamic = None,
     progress: OptionalProgress = None,
+    linear_system_observer: Dynamic = None,
 ) -> Dynamic:
     """Solve one case without retaining its complete trajectory."""
 
@@ -180,11 +183,12 @@ def stream_forward(
         case["solver"]["platform"],
         case["solver"]["backend"],
     )
-    solver = problem.create_solver(
-        memory_space,
-        solver_type,
-        options=case["solver"].get("options"),
-    )
+    solver_options = {
+        "options": case["solver"].get("options"),
+    }
+    if linear_system_observer is not None:
+        solver_options["linear_system_observer"] = linear_system_observer
+    solver = problem.create_solver(memory_space, solver_type, **solver_options)
     callback = (
         None
         if sample is None

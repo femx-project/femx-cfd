@@ -1,5 +1,6 @@
 import contextlib
 import io
+import importlib.util
 import json
 import shutil
 import tempfile
@@ -11,6 +12,8 @@ import h5py
 import numpy as np
 import yaml
 
+import femx
+
 from femx_cfd.cli import run_cli
 from femx_cfd.cases.forward import CASE_FORMAT, CASE_VERSION
 from femx_cfd.data import InletVelocityData, save_inlet
@@ -20,6 +23,63 @@ MESH = Path(__file__).resolve().parents[1] / "data" / "2d_tiny_tube.msh"
 
 
 class ForwardApplicationTest(unittest.TestCase):
+    @unittest.skipUnless(
+        importlib.util.find_spec("femx_ml") is not None
+        and femx.SolverType.RESOLVE in femx.solver_types(),
+        "femx-ml or the ReSolve solver is unavailable",
+    )
+    def test_writes_observed_linear_systems(self):
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            shutil.copyfile(MESH, directory / "mesh.msh")
+            case = {
+                "format": CASE_FORMAT,
+                "version": CASE_VERSION,
+                "output": {"linear_systems": True},
+                "mesh": {"path": "mesh.msh", "length_unit": "mm"},
+                "fluid": {"rho": 1.0, "mu": 0.01},
+                "time": {"dt": 0.25, "end_time": 0.25},
+                "boundary_conditions": [
+                    {
+                        "boundary": "inlet",
+                        "kind": "velocity",
+                        "source": "analytic",
+                        "normal": "auto",
+                        "profile": {"kind": "uniform", "value": 0.1},
+                    },
+                    {
+                        "boundary": "wall",
+                        "kind": "velocity",
+                        "source": "analytic",
+                        "value": [0.0, 0.0],
+                    },
+                    {
+                        "boundary": "outlet",
+                        "kind": "pressure",
+                        "source": "analytic",
+                        "value": 0.0,
+                    },
+                ],
+                "solver": {"backend": "resolve"},
+            }
+            case_path = directory / "case.yaml"
+            case_path.write_text(yaml.safe_dump(case), encoding="utf-8")
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = run_cli(["run", str(case_path)])
+
+            output = directory / "result"
+            self.assertEqual(code, 0)
+            with h5py.File(output / "linear_systems.h5") as h5:
+                self.assertTrue(bool(h5.attrs["complete"]))
+                self.assertGreater(int(h5.attrs["sample_count"]), 0)
+                self.assertEqual(
+                    h5["metadata"].attrs["solver_backend"],
+                    "resolve",
+                )
+            result = json.loads((output / "result.json").read_text())
+            self.assertEqual(result["linear_systems"], "linear_systems.h5")
+
     def test_runs_case_and_writes_machine_readable_result(self):
         with tempfile.TemporaryDirectory() as directory:
             directory = Path(directory)

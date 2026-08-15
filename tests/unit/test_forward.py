@@ -361,6 +361,30 @@ class ForwardCaseTest(unittest.TestCase):
             {"boundary": "wall"},
         )
 
+    def test_accepts_host_linear_system_output(self):
+        case = make_case(MESH)
+        case["output"] = {"linear_systems": True}
+
+        validated = validate_forward_case(case)
+
+        self.assertTrue(validated["output"]["linear_systems"])
+
+    def test_rejects_device_linear_system_output(self):
+        case = make_case(MESH)
+        case["solver"] = {"platform": "cuda", "backend": "resolve"}
+        case["output"] = {"linear_systems": True}
+
+        with self.assertRaisesRegex(ValueError, "CPU dense or ReSolve"):
+            validate_forward_case(case)
+
+    def test_rejects_petsc_linear_system_output(self):
+        case = make_case(MESH)
+        case["solver"] = {"platform": "cpu", "backend": "petsc"}
+        case["output"] = {"linear_systems": True}
+
+        with self.assertRaisesRegex(ValueError, "CPU dense or ReSolve"):
+            validate_forward_case(case)
+
     def test_accepts_wall_shear_stress_time_average(self):
         case = make_case(MESH)
         case["output"] = {
@@ -538,6 +562,29 @@ class ForwardCaseTest(unittest.TestCase):
         callback(4, state)
         samples.assert_called_once_with(mock.sentinel.model, 4, state)
         solver.solve.assert_not_called()
+
+    def test_passes_linear_system_observer_to_the_solver(self):
+        case = make_case(MESH)
+        problem = mock.Mock()
+        problem.model = mock.sentinel.model
+        observer = mock.Mock()
+
+        with mock.patch(
+            "femx_cfd.workflows.forward._make_forward_problem",
+            return_value=(problem, np.asarray([1.0])),
+        ):
+            stream_forward(
+                case,
+                every=1,
+                linear_system_observer=observer,
+            )
+
+        problem.create_solver.assert_called_once_with(
+            femx.MemorySpace.HOST,
+            femx.SolverType.DENSE,
+            options=None,
+            linear_system_observer=observer,
+        )
 
     def test_repeats_periodic_prepared_inlet_for_forward_interval(self):
         inlet = InletVelocityData(
